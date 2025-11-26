@@ -1,0 +1,13 @@
+@PlayerQueueService.Api_HostAddress = http://localhost:5045
+
+POST {{PlayerQueueService.Api_HostAddress}}/api/queue/enqueue
+Content-Type: application/json
+
+{
+  "playerId": "00000000-0000-0000-0000-000000000001",
+  "skillRating": 1500,
+  "region": "na",
+  "gameMode": "solo"
+}
+
+###
