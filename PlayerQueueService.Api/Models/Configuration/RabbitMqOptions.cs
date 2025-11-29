@@ -32,4 +32,13 @@ public class RabbitMqOptions
 
     [Range(10, 300)]
     public int HeartbeatSeconds { get; set; } = 60;
+
+    [Range(1, 10)]
+    public int MaxRetryAttempts { get; set; } = 3;
+
+    [Range(1, 120)]
+    public int RetryDelaySeconds { get; set; } = 2;
+
+    [Range(1, 60)]
+    public int PublishConfirmTimeoutSeconds { get; set; } = 5;
 }
