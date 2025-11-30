@@ -10,7 +10,7 @@ public sealed class RabbitMqConnection : IRabbitMqConnection
     private IConnection? _connection;
     private readonly object _syncRoot = new();
 
-    public RabbitMqConnection(IOptions<RabbitMqOptions> options)
+    public RabbitMqConnection(IOptions<RabbitMQSettings> options)
     {
         var settings = options.Value ?? throw new ArgumentNullException(nameof(options));
 
@@ -18,14 +18,22 @@ public sealed class RabbitMqConnection : IRabbitMqConnection
         {
             HostName = settings.HostName,
             Port = settings.Port,
-            UserName = settings.UserName,
-            Password = settings.Password,
             VirtualHost = settings.VirtualHost,
             DispatchConsumersAsync = true,
             AutomaticRecoveryEnabled = true,
             TopologyRecoveryEnabled = true,
             RequestedHeartbeat = TimeSpan.FromSeconds(settings.HeartbeatSeconds)
         };
+
+        if (!string.IsNullOrWhiteSpace(settings.UserName))
+        {
+            _factory.UserName = settings.UserName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.Password))
+        {
+            _factory.Password = settings.Password;
+        }
     }
 
     public IModel CreateChannel()

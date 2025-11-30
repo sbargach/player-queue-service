@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Released]
 
+## [0.0.2] - 2025-11-30
+### Changed
+- Improved RabbitMQ handling.
+
 ## [0.0.1] - 2025-11-26
 ### Added
 - Broker-confirmed publishing with mandatory returns so queue writes aren't fire-and-forget.

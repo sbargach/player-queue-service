@@ -16,19 +16,20 @@ public class PlayerQueuePublisherTests
     private readonly IRabbitMqConnection _connection;
     private readonly IModel _channel;
     private readonly IBasicProperties _properties;
-    private readonly RabbitMqOptions _options;
+    private readonly RabbitMQSettings _settings;
 
     public PlayerQueuePublisherTests()
     {
         _connection = Substitute.For<IRabbitMqConnection>();
         _channel = Substitute.For<IModel>();
         _properties = Substitute.For<IBasicProperties>();
-        _options = new RabbitMqOptions
+        _settings = new RabbitMQSettings
         {
             ExchangeName = "player-queue",
             QueueName = "player-queue.enqueued",
             RoutingKey = "player.queue.enqueued",
-            PublishConfirmTimeoutSeconds = 1
+            PublishConfirmTimeoutSeconds = 1,
+            RetryDelaySeconds = 1
         };
 
         _connection.CreateChannel().Returns(_channel);
@@ -37,17 +38,21 @@ public class PlayerQueuePublisherTests
     }
 
     [Fact]
-    public async Task PublishAsync_ThrowsWhenConfirmationTimesOut()
+    public async Task PublishAsync_RetriesUntilCancelled_WhenConfirmationTimesOut()
     {
         _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(false);
 
         var publisher = new PlayerQueuePublisher(
             _connection,
-            Options.Create(_options),
+            Options.Create(_settings),
             NullLogger<PlayerQueuePublisher>.Instance);
 
-        await Assert.ThrowsAsync<TimeoutException>(() => publisher.PublishAsync(new PlayerEnqueuedEvent()));
-        _channel.Received(1).ConfirmSelect();
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => publisher.PublishAsync(new PlayerEnqueuedEvent(), cts.Token));
+
+        _channel.Received().ConfirmSelect();
     }
 
     [Fact]
@@ -57,17 +62,32 @@ public class PlayerQueuePublisherTests
 
         var publisher = new PlayerQueuePublisher(
             _connection,
-            Options.Create(_options),
+            Options.Create(_settings),
             NullLogger<PlayerQueuePublisher>.Instance);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => publisher.PublishAsync(new PlayerEnqueuedEvent()));
+        await Assert.ThrowsAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(new PlayerEnqueuedEvent()));
 
         _channel.Received(1).BasicPublish(
-            _options.ExchangeName,
-            _options.RoutingKey,
+            _settings.ExchangeName,
+            _settings.RoutingKey,
             true,
             _properties,
             Arg.Any<ReadOnlyMemory<byte>>());
+    }
+
+    [Fact]
+    public async Task PublishAsync_DoesNotRetryOnBrokerReturn()
+    {
+        _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(InvokeBasicReturn());
+
+        var publisher = new PlayerQueuePublisher(
+            _connection,
+            Options.Create(_settings),
+            NullLogger<PlayerQueuePublisher>.Instance);
+
+        await Assert.ThrowsAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(new PlayerEnqueuedEvent()));
+
+        _connection.Received(1).CreateChannel();
     }
 
     private Func<CallInfo, bool> InvokeBasicReturn()
@@ -78,8 +98,8 @@ public class PlayerQueuePublisherTests
                 _channel,
                 new BasicReturnEventArgs
                 {
-                    Exchange = _options.ExchangeName,
-                    RoutingKey = _options.RoutingKey,
+                    Exchange = _settings.ExchangeName,
+                    RoutingKey = _settings.RoutingKey,
                     ReplyCode = 312,
                     ReplyText = "NO_ROUTE"
                 });

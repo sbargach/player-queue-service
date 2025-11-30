@@ -9,12 +9,12 @@ namespace PlayerQueueService.Api.HealthChecks;
 public class RabbitMqHealthCheck : IHealthCheck
 {
     private readonly IRabbitMqConnection _connection;
-    private readonly RabbitMqOptions _options;
+    private readonly RabbitMQSettings _settings;
 
-    public RabbitMqHealthCheck(IRabbitMqConnection connection, IOptions<RabbitMqOptions> options)
+    public RabbitMqHealthCheck(IRabbitMqConnection connection, IOptions<RabbitMQSettings> settings)
     {
         _connection = connection;
-        _options = options.Value;
+        _settings = settings.Value;
     }
 
     public Task<HealthCheckResult> CheckHealthAsync(
@@ -24,7 +24,7 @@ public class RabbitMqHealthCheck : IHealthCheck
         try
         {
             using var channel = _connection.CreateChannel();
-            RabbitMqTopology.EnsureQueue(channel, _options);
+            RabbitMqTopology.EnsureQueue(channel, _settings);
             return Task.FromResult(HealthCheckResult.Healthy("RabbitMQ connection established."));
         }
         catch (Exception ex)

@@ -3,12 +3,12 @@ using PlayerQueueService.Api.Models.Configuration;
 
 namespace PlayerQueueService.Api.Tests;
 
-public class RabbitMqOptionsTests
+public class RabbitMQSettingsTests
 {
     [Fact]
     public void ValidationFailsWhenRequiredFieldsAreMissing()
     {
-        var options = new RabbitMqOptions
+        var settings = new RabbitMQSettings
         {
             HostName = string.Empty,
             QueueName = string.Empty,
@@ -17,22 +17,22 @@ public class RabbitMqOptionsTests
         };
 
         var results = new List<ValidationResult>();
-        var isValid = Validator.TryValidateObject(options, new ValidationContext(options), results, validateAllProperties: true);
+        var isValid = Validator.TryValidateObject(settings, new ValidationContext(settings), results, validateAllProperties: true);
 
         Assert.False(isValid);
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMqOptions.HostName)));
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMqOptions.QueueName)));
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMqOptions.ExchangeName)));
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMqOptions.RoutingKey)));
+        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.HostName)));
+        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.QueueName)));
+        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.ExchangeName)));
+        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.RoutingKey)));
     }
 
     [Fact]
     public void ValidationPassesWithDefaults()
     {
-        var options = new RabbitMqOptions();
+        var settings = new RabbitMQSettings();
         var results = new List<ValidationResult>();
 
-        var isValid = Validator.TryValidateObject(options, new ValidationContext(options), results, validateAllProperties: true);
+        var isValid = Validator.TryValidateObject(settings, new ValidationContext(settings), results, validateAllProperties: true);
 
         Assert.True(isValid);
         Assert.Empty(results);
@@ -47,7 +47,7 @@ public class RabbitMqOptionsTests
         int retryDelaySeconds,
         int publishConfirmTimeoutSeconds)
     {
-        var options = new RabbitMqOptions
+        var settings = new RabbitMQSettings
         {
             MaxRetryAttempts = maxRetryAttempts,
             RetryDelaySeconds = retryDelaySeconds,
@@ -55,7 +55,7 @@ public class RabbitMqOptionsTests
         };
 
         var results = new List<ValidationResult>();
-        var isValid = Validator.TryValidateObject(options, new ValidationContext(options), results, validateAllProperties: true);
+        var isValid = Validator.TryValidateObject(settings, new ValidationContext(settings), results, validateAllProperties: true);
 
         Assert.False(isValid);
     }

@@ -15,7 +15,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
 {
     private readonly IRabbitMqConnection _connection;
     private readonly IPlayerQueueProcessor _processor;
-    private readonly RabbitMqOptions _options;
+    private readonly RabbitMQSettings _settings;
     private readonly ILogger<PlayerQueueConsumer> _logger;
     private readonly IHostApplicationLifetime _applicationLifetime;
     private CancellationToken _stoppingToken;
@@ -26,14 +26,14 @@ public sealed class PlayerQueueConsumer : BackgroundService
     public PlayerQueueConsumer(
         IRabbitMqConnection connection,
         IPlayerQueueProcessor processor,
-        IOptions<RabbitMqOptions> options,
+        IOptions<RabbitMQSettings> options,
         IHostApplicationLifetime applicationLifetime,
         ILogger<PlayerQueueConsumer> logger)
     {
         _connection = connection;
         _processor = processor;
         _logger = logger;
-        _options = options.Value;
+        _settings = options.Value;
         _applicationLifetime = applicationLifetime;
     }
 
@@ -50,8 +50,8 @@ public sealed class PlayerQueueConsumer : BackgroundService
     private void InitializeConsumer()
     {
         _channel = _connection.CreateChannel();
-        _channel.BasicQos(0, _options.PrefetchCount, global: false);
-        RabbitMqTopology.EnsureQueue(_channel, _options);
+        _channel.BasicQos(0, _settings.PrefetchCount, global: false);
+        RabbitMqTopology.EnsureQueue(_channel, _settings);
 
         _channel.CallbackException += (_, args) =>
         {
@@ -73,9 +73,9 @@ public sealed class PlayerQueueConsumer : BackgroundService
             return Task.CompletedTask;
         };
 
-        _channel.BasicConsume(_options.QueueName, autoAck: false, consumer: _consumer);
+        _channel.BasicConsume(_settings.QueueName, autoAck: false, consumer: _consumer);
 
-        _logger.LogInformation("Player queue consumer started on {Queue}", _options.QueueName);
+        _logger.LogInformation("Player queue consumer started on {Queue}", _settings.QueueName);
     }
 
     private async Task OnMessageAsync(object sender, BasicDeliverEventArgs args)
@@ -127,7 +127,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
         CancellationToken cancellationToken)
     {
         var attempt = 0;
-        var retryDelay = TimeSpan.FromSeconds(_options.RetryDelaySeconds);
+        var retryDelay = TimeSpan.FromSeconds(_settings.RetryDelaySeconds);
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -142,7 +142,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
             {
                 throw;
             }
-            catch (Exception ex) when (attempt < _options.MaxRetryAttempts)
+            catch (Exception ex) when (attempt < _settings.MaxRetryAttempts)
             {
                 _logger.LogWarning(
                     ex,

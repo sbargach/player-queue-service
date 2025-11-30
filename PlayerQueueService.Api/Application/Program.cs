@@ -44,20 +44,7 @@ public class Program
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
 
-        builder.Services.AddOptions<RabbitMqOptions>()
-            .Bind(builder.Configuration.GetSection("RabbitMq"))
-            .ValidateDataAnnotations()
-            .Validate(options => !string.IsNullOrWhiteSpace(options.QueueName), "QueueName is required")
-            .Validate(options => !string.IsNullOrWhiteSpace(options.ExchangeName), "ExchangeName is required")
-            .ValidateOnStart();
-
-        builder.Services.AddSingleton<IRabbitMqConnection, RabbitMqConnection>();
-        builder.Services.AddSingleton<IPlayerQueuePublisher, PlayerQueuePublisher>();
-        builder.Services.AddSingleton<IPlayerQueueProcessor, PlayerQueueProcessor>();
-        builder.Services.AddHostedService<PlayerQueueConsumer>();
-
-        builder.Services.AddHealthChecks()
-            .AddCheck<RabbitMqHealthCheck>("rabbitmq", failureStatus: HealthStatus.Unhealthy);
+        ConfigureRabbitMQ(builder);
     }
 
     private static WebApplication BuildApp(WebApplicationBuilder builder) => builder.Build();
@@ -74,5 +61,31 @@ public class Program
 
         app.MapControllers();
         app.MapHealthChecks("/health");
+    }
+
+    private static void ConfigureRabbitMQ(WebApplicationBuilder builder)
+    {
+        var rabbitSection = builder.Configuration.GetSection("RabbitMQ");
+        if (!rabbitSection.Exists())
+        {
+            rabbitSection = builder.Configuration.GetSection("RabbitMq");
+        }
+
+        builder.Services.AddOptions<RabbitMQSettings>()
+            .Bind(rabbitSection)
+            .ValidateDataAnnotations()
+            .Validate(options => !string.IsNullOrWhiteSpace(options.QueueName), "QueueName is required")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.ExchangeName), "ExchangeName is required")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.RoutingKey), "RoutingKey is required")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.HostName), "HostName is required")
+            .ValidateOnStart();
+
+        builder.Services.AddSingleton<IRabbitMqConnection, RabbitMqConnection>();
+        builder.Services.AddSingleton<IPlayerQueuePublisher, PlayerQueuePublisher>();
+        builder.Services.AddSingleton<IPlayerQueueProcessor, PlayerQueueProcessor>();
+        builder.Services.AddHostedService<PlayerQueueConsumer>();
+
+        builder.Services.AddHealthChecks()
+            .AddCheck<RabbitMqHealthCheck>("rabbitmq", failureStatus: HealthStatus.Unhealthy);
     }
 }
