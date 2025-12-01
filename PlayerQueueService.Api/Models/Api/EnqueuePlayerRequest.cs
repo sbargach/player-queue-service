@@ -12,9 +12,11 @@ public class EnqueuePlayerRequest
 
     [Required]
     [StringLength(32)]
+    [NotWhitespace]
     public string Region { get; set; } = string.Empty;
 
     [Required]
     [StringLength(32)]
+    [NotWhitespace]
     public string GameMode { get; set; } = string.Empty;
 }

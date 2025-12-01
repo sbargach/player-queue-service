@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using PlayerQueueService.Api.HealthChecks;
@@ -60,6 +61,14 @@ public class Program
         app.UseHttpsRedirection();
 
         app.MapControllers();
+        app.MapHealthChecks("/health/live", new HealthCheckOptions
+        {
+            Predicate = check => check.Tags.Contains("liveness")
+        });
+        app.MapHealthChecks("/health/ready", new HealthCheckOptions
+        {
+            Predicate = check => check.Tags.Contains("readiness")
+        });
         app.MapHealthChecks("/health");
     }
 
@@ -86,6 +95,10 @@ public class Program
         builder.Services.AddHostedService<PlayerQueueConsumer>();
 
         builder.Services.AddHealthChecks()
-            .AddCheck<RabbitMqHealthCheck>("rabbitmq", failureStatus: HealthStatus.Unhealthy);
+            .AddCheck("self", () => HealthCheckResult.Healthy(), tags: new[] { "liveness" })
+            .AddCheck<RabbitMqHealthCheck>(
+                "rabbitmq",
+                failureStatus: HealthStatus.Unhealthy,
+                tags: new[] { "readiness" });
     }
 }

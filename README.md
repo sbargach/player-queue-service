@@ -10,3 +10,7 @@ Event-driven matchmaking queue service built with .NET 10 and RabbitMQ. It publi
 4. Run the API: `dotnet run --project PlayerQueueService.Api`.
 
 POST `api/queue/enqueue` with a player payload to publish a `player.queue.enqueued` event. The hosted consumer logs processing and acknowledges messages using RabbitMQ best practices (durable queues, manual acks, and connection recovery).
+
+Health endpoints:
+- Liveness: `GET /health/live`
+- Readiness: `GET /health/ready`
