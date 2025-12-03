@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.4] - 2025-12-03
+### Changed
+- Converted the service to a .NET worker host focused solely on RabbitMQ processing, removing HTTP and health endpoints.
+- Wired the consumer as a hosted background service with configuration validation and durable queue topology.
+- Trimmed API-specific artifacts and refreshed unit tests around the core worker components.
+
 ## [0.0.3] - 2025-12-01
 ### Added
 - Liveness (`/health/live`) and readiness (`/health/ready`) endpoints with tagged health checks.

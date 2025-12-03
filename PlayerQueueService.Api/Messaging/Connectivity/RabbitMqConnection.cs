@@ -63,21 +63,25 @@ public sealed class RabbitMqConnection : IRabbitMqConnection
 
     public void Dispose()
     {
-        if (_connection == null)
+        lock (_syncRoot)
         {
-            return;
-        }
-
-        try
-        {
-            if (_connection.IsOpen)
+            if (_connection == null)
             {
-                _connection.Close();
+                return;
             }
-        }
-        finally
-        {
-            _connection.Dispose();
+
+            try
+            {
+                if (_connection.IsOpen)
+                {
+                    _connection.Close();
+                }
+            }
+            finally
+            {
+                _connection.Dispose();
+                _connection = null;
+            }
         }
     }
 }
