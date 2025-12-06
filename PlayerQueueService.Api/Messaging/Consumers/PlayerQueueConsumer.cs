@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -6,8 +8,10 @@ using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Models.Configuration;
 using PlayerQueueService.Api.Models.Events;
 using PlayerQueueService.Api.Services;
+using PlayerQueueService.Api.Telemetry;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using OpenTelemetry.Context.Propagation;
 
 namespace PlayerQueueService.Api.Messaging.Consumers;
 
@@ -18,6 +22,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
     private readonly RabbitMQSettings _settings;
     private readonly ILogger<PlayerQueueConsumer> _logger;
     private readonly IHostApplicationLifetime _applicationLifetime;
+    private readonly IMetricsProvider _metrics;
     private CancellationToken _stoppingToken;
     private IModel? _channel;
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -28,13 +33,15 @@ public sealed class PlayerQueueConsumer : BackgroundService
         IPlayerQueueProcessor processor,
         IOptions<RabbitMQSettings> options,
         IHostApplicationLifetime applicationLifetime,
-        ILogger<PlayerQueueConsumer> logger)
+        ILogger<PlayerQueueConsumer> logger,
+        IMetricsProvider metrics)
     {
         _connection = connection;
         _processor = processor;
         _logger = logger;
         _settings = options.Value;
         _applicationLifetime = applicationLifetime;
+        _metrics = metrics;
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -90,7 +97,12 @@ public sealed class PlayerQueueConsumer : BackgroundService
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_stoppingToken);
         var cancellationToken = linkedCts.Token;
+        using var activity = StartConsumeActivity(args);
+        activity?.SetTag("messaging.system", "rabbitmq");
+        activity?.SetTag("messaging.destination", _settings.QueueName);
+        activity?.SetTag("player.deliveryTag", args.DeliveryTag);
 
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             var message = JsonSerializer.Deserialize<PlayerEnqueuedEvent>(args.Body.Span, SerializerOptions);
@@ -99,12 +111,26 @@ public sealed class PlayerQueueConsumer : BackgroundService
             {
                 _logger.LogCritical("Received empty player event message; stopping application to preserve delivery");
                 _applicationLifetime.StopApplication();
+                activity?.SetStatus(ActivityStatusCode.Error, "deserialization_failed");
+                _metrics.IncrementConsumeFailure(
+                    new PlayerEnqueuedEvent { GameMode = "unknown", Region = "unknown" },
+                    "deserialization_failed",
+                    _settings.QueueName);
                 throw new InvalidOperationException("Empty player event payload.");
             }
 
-            await TryProcessWithRetryAsync(message, cancellationToken).ConfigureAwait(false);
+            activity?.SetTag("player.id", message.PlayerId);
+            activity?.SetTag("player.region", message.Region);
+            activity?.SetTag("player.mode", message.GameMode);
+
+            _metrics.IncrementInFlight(_settings.QueueName);
+            await TryProcessWithRetryAsync(message, cancellationToken, activity).ConfigureAwait(false);
 
             channel.BasicAck(args.DeliveryTag, multiple: false);
+            stopwatch.Stop();
+            _metrics.IncrementConsumeSuccess(message, _settings.QueueName);
+            _metrics.RecordConsumeDuration(message, stopwatch.Elapsed.TotalMilliseconds, _settings.QueueName);
+            activity?.SetStatus(ActivityStatusCode.Ok);
         }
         catch (OperationCanceledException) when (_stoppingToken.IsCancellationRequested)
         {
@@ -113,18 +139,65 @@ public sealed class PlayerQueueConsumer : BackgroundService
             {
                 channel.BasicNack(args.DeliveryTag, multiple: false, requeue: true);
             }
+            activity?.SetStatus(ActivityStatusCode.Error, "canceled");
+            stopwatch.Stop();
+            _metrics.IncrementConsumeFailure(
+                new PlayerEnqueuedEvent { GameMode = "unknown", Region = "unknown" },
+                "canceled",
+                _settings.QueueName);
         }
         catch (Exception ex)
         {
             _logger.LogCritical(ex, "Unhandled processing failure for message {DeliveryTag}; stopping application", args.DeliveryTag);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             _applicationLifetime.StopApplication();
             throw;
         }
+        finally
+        {
+            if (stopwatch.IsRunning)
+            {
+                stopwatch.Stop();
+            }
+            _metrics.DecrementInFlight(_settings.QueueName);
+        }
+    }
+
+    private static Activity? StartConsumeActivity(BasicDeliverEventArgs args)
+    {
+        var headers = args.BasicProperties?.Headers ?? new Dictionary<string, object?>();
+        var carrier = new Dictionary<string, string?>();
+
+        foreach (var (key, value) in headers)
+        {
+            switch (value)
+            {
+                case byte[] bytes:
+                    carrier[key] = Encoding.UTF8.GetString(bytes);
+                    break;
+                case string str:
+                    carrier[key] = str;
+                    break;
+            }
+        }
+
+        var propagationContext = Tracing.Propagator.Extract(
+            default,
+            carrier,
+            static (dict, key) => dict.TryGetValue(key, out var value) && value is not null
+                ? new[] { value }
+                : Array.Empty<string>());
+
+        return Tracing.ActivitySource.StartActivity(
+            "rabbitmq.consume",
+            ActivityKind.Consumer,
+            propagationContext.ActivityContext);
     }
 
     private async Task TryProcessWithRetryAsync(
         PlayerEnqueuedEvent message,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Activity? activity)
     {
         var attempt = 0;
         var retryDelay = TimeSpan.FromSeconds(_settings.RetryDelaySeconds);
@@ -151,6 +224,13 @@ public sealed class PlayerQueueConsumer : BackgroundService
                     message.PlayerId,
                     retryDelay.TotalMilliseconds);
 
+                activity?.AddEvent(new ActivityEvent("retrying", tags: new ActivityTagsCollection
+                {
+                    { "retry.attempt", attempt },
+                    { "player.id", message.PlayerId }
+                }));
+                _metrics.IncrementProcessingRetry(message, _settings.QueueName);
+
                 await Task.Delay(retryDelay, cancellationToken).ConfigureAwait(false);
                 retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 30));
             }
@@ -161,6 +241,8 @@ public sealed class PlayerQueueConsumer : BackgroundService
                     "Processing failed for player {PlayerId} after {Attempts} attempts; stopping application to preserve message",
                     message.PlayerId,
                     attempt);
+                _metrics.IncrementConsumeFailure(message, ex.GetType().Name, _settings.QueueName);
+                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                 _applicationLifetime.StopApplication();
                 throw;
             }

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.5] - 2025-12-04
+### Added
+- Add tracing and metrics.
+
 ## [0.0.4] - 2025-12-03
 ### Changed
 - Converted the service to a .NET worker host focused solely on RabbitMQ processing, removing HTTP and health endpoints.

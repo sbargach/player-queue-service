@@ -1,10 +1,15 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using PlayerQueueService.Api.Messaging.Consumers;
 using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Messaging.Publishing;
 using PlayerQueueService.Api.Models.Configuration;
 using PlayerQueueService.Api.Services;
+using PlayerQueueService.Api.Telemetry;
+using Serilog;
 
 namespace PlayerQueueService.Api.Application;
 
@@ -12,9 +17,18 @@ public static class HostBuilderFactory
 {
     public static IHostBuilder Create(string[] args) =>
         Host.CreateDefaultBuilder(args)
+            .UseSerilog((context, services, configuration) =>
+            {
+                configuration
+                    .ReadFrom.Configuration(context.Configuration)
+                    .ReadFrom.Services(services)
+                    .Enrich.FromLogContext()
+                    .WriteTo.Console();
+            })
             .ConfigureServices((context, services) =>
             {
                 ConfigureRabbitMQ(context, services);
+                ConfigureTelemetry(services);
                 services.AddHostedService<PlayerQueueConsumer>();
             });
 
@@ -38,5 +52,27 @@ public static class HostBuilderFactory
         services.AddSingleton<IRabbitMqConnection, RabbitMqConnection>();
         services.AddSingleton<IPlayerQueuePublisher, PlayerQueuePublisher>();
         services.AddSingleton<IPlayerQueueProcessor, PlayerQueueProcessor>();
+        services.AddSingleton<IMetricsProvider, MetricsProvider>();
+    }
+
+    private static void ConfigureTelemetry(IServiceCollection services)
+    {
+        services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource.AddService("player-queue-service.api"))
+            .WithMetrics(metrics =>
+            {
+                metrics
+                    .AddMeter("PlayerQueueService.Telemetry")
+                    .AddRuntimeInstrumentation()
+                    .AddConsoleExporter();
+            })
+            .WithTracing(tracing =>
+            {
+                tracing
+                    .AddSource(Tracing.ActivitySourceName)
+                    .SetSampler(new AlwaysOnSampler())
+                    .AddConsoleExporter()
+                    .AddOtlpExporter();
+            });
     }
 }
