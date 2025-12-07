@@ -22,6 +22,9 @@ obj/
 *.snupkg
 packages/
 
+# Build configuration
+Directory.Build.props
+
 # Logs
 *.log
 
