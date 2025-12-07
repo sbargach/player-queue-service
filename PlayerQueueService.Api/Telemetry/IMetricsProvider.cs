@@ -14,4 +14,6 @@ public interface IMetricsProvider : IDisposable
     void RecordConsumeDuration(PlayerEnqueuedEvent playerEvent, double milliseconds, string queueName);
     void IncrementInFlight(string queueName);
     void DecrementInFlight(string queueName);
+    void IncrementMatchFormed(Models.Matchmaking.MatchResult match);
+    void RecordQueueWait(Models.Matchmaking.MatchResult match);
 }

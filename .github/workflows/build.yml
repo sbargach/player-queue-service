@@ -1,0 +1,33 @@
+name: build-and-test
+
+on:
+  workflow_call:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore PlayerQueueService.sln
+
+      - name: Build
+        run: dotnet build PlayerQueueService.Api/PlayerQueueService.Api.csproj --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test PlayerQueueService.Api.Tests/PlayerQueueService.Api.Tests.csproj --no-build --configuration Release --logger "trx;LogFileName=unit-tests.trx" --results-directory TestResults
+
+      - name: Publish test results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: '**/TestResults/*.trx'
+          github_token: ${{ secrets.GITHUB_TOKEN }}

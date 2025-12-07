@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using System.Globalization;
 using PlayerQueueService.Api.Messaging.Consumers;
 using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Messaging.Publishing;
@@ -23,11 +24,12 @@ public static class HostBuilderFactory
                     .ReadFrom.Configuration(context.Configuration)
                     .ReadFrom.Services(services)
                     .Enrich.FromLogContext()
-                    .WriteTo.Console();
+                    .WriteTo.Console(formatProvider: CultureInfo.InvariantCulture);
             })
             .ConfigureServices((context, services) =>
             {
                 ConfigureRabbitMQ(context, services);
+                ConfigureMatchmaking(context, services);
                 ConfigureTelemetry(services);
                 services.AddHostedService<PlayerQueueConsumer>();
             });
@@ -52,7 +54,17 @@ public static class HostBuilderFactory
         services.AddSingleton<IRabbitMqConnection, RabbitMqConnection>();
         services.AddSingleton<IPlayerQueuePublisher, PlayerQueuePublisher>();
         services.AddSingleton<IPlayerQueueProcessor, PlayerQueueProcessor>();
+        services.AddSingleton<IMatchmaker, Matchmaker>();
         services.AddSingleton<IMetricsProvider, MetricsProvider>();
+    }
+
+    private static void ConfigureMatchmaking(HostBuilderContext context, IServiceCollection services)
+    {
+        services.AddOptions<MatchmakingSettings>()
+            .Bind(context.Configuration.GetSection("Matchmaking"))
+            .ValidateDataAnnotations()
+            .Validate(options => options.TeamSize > 1, "TeamSize must be at least 2")
+            .ValidateOnStart();
     }
 
     private static void ConfigureTelemetry(IServiceCollection services)

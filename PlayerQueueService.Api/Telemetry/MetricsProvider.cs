@@ -1,5 +1,7 @@
 using System.Diagnostics.Metrics;
+using System.Linq;
 using PlayerQueueService.Api.Models.Events;
+using PlayerQueueService.Api.Models.Matchmaking;
 
 namespace PlayerQueueService.Api.Telemetry;
 
@@ -12,8 +14,10 @@ public sealed class MetricsProvider : IMetricsProvider
     private readonly Counter<long> _processingFailures;
     private readonly Counter<long> _processingSuccesses;
     private readonly Counter<long> _processingRetries;
+    private readonly Counter<long> _matchesFormed;
     private readonly Histogram<double> _publishDuration;
     private readonly Histogram<double> _processingDuration;
+    private readonly Histogram<double> _queueWait;
     private readonly UpDownCounter<long> _inFlightProcessing;
     private bool _disposed;
 
@@ -26,8 +30,10 @@ public sealed class MetricsProvider : IMetricsProvider
         _processingFailures = _meter.CreateCounter<long>("playerqueue.consume.failures", description: "Failed message processing attempts.");
         _processingSuccesses = _meter.CreateCounter<long>("playerqueue.consume.successes", description: "Successfully processed messages.");
         _processingRetries = _meter.CreateCounter<long>("playerqueue.consume.retries", description: "Processing retries triggered by failures.");
+        _matchesFormed = _meter.CreateCounter<long>("playerqueue.match.formed", description: "Matches successfully formed.");
         _publishDuration = _meter.CreateHistogram<double>("playerqueue.publish.duration.ms", unit: "ms", description: "Duration of publish operations.");
         _processingDuration = _meter.CreateHistogram<double>("playerqueue.consume.duration.ms", unit: "ms", description: "Duration of consume operations.");
+        _queueWait = _meter.CreateHistogram<double>("playerqueue.queue.wait.ms", unit: "ms", description: "Time players waited before matchmaking.");
         _inFlightProcessing = _meter.CreateUpDownCounter<long>("playerqueue.consume.inflight", description: "Messages currently being processed.");
     }
 
@@ -61,22 +67,33 @@ public sealed class MetricsProvider : IMetricsProvider
     public void DecrementInFlight(string queueName) =>
         _inFlightProcessing.Add(-1, new KeyValuePair<string, object?>("queue", queueName));
 
+    public void IncrementMatchFormed(MatchResult match) =>
+        _matchesFormed.Add(1, BuildTags(match.Region, match.GameMode));
+
+    public void RecordQueueWait(MatchResult match)
+    {
+        foreach (var player in match.Players)
+        {
+            var waitMs = (match.MatchedAt - player.RequestedAt).TotalMilliseconds;
+            _queueWait.Record(waitMs, BuildTags(player.Region, player.GameMode));
+        }
+    }
+
     private static KeyValuePair<string, object?>[] BuildTags(PlayerEnqueuedEvent playerEvent, string queueName = "") =>
+        BuildTags(playerEvent.Region, playerEvent.GameMode, queueName);
+
+    private static KeyValuePair<string, object?>[] BuildTags(string region, string mode, string queueName = "") =>
         new[]
         {
-            new KeyValuePair<string, object?>("region", playerEvent.Region),
-            new KeyValuePair<string, object?>("mode", playerEvent.GameMode),
+            new KeyValuePair<string, object?>("region", region),
+            new KeyValuePair<string, object?>("mode", mode),
             new KeyValuePair<string, object?>("queue", queueName)
         };
 
     private static KeyValuePair<string, object?>[] BuildFailureTags(PlayerEnqueuedEvent playerEvent, string reason, string queueName = "") =>
-        new[]
-        {
-            new KeyValuePair<string, object?>("region", playerEvent.Region),
-            new KeyValuePair<string, object?>("mode", playerEvent.GameMode),
-            new KeyValuePair<string, object?>("queue", queueName),
-            new KeyValuePair<string, object?>("reason", reason)
-        };
+        BuildTags(playerEvent, queueName)
+            .Append(new KeyValuePair<string, object?>("reason", reason))
+            .ToArray();
 
     public void Dispose()
     {

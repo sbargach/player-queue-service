@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.6] - 2025-12-07
+### Added
+- In-memory matchmaking with skill delta and wait-time limits plus metrics.
+- Analyzer + style rules and CI workflows for builds/tests.
+- Dockerfile and compose for local RabbitMQ + worker.
+
 ## [0.0.5] - 2025-12-04
 ### Added
 - Add tracing and metrics.

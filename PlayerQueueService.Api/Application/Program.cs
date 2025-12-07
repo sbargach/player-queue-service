@@ -1,6 +1,6 @@
-using PlayerQueueService.Api.Application;
+namespace PlayerQueueService.Api.Application;
 
-public class Program
+public static class Program
 {
     public static async Task Main(string[] args)
     {

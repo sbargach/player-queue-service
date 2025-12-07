@@ -124,7 +124,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
             activity?.SetTag("player.mode", message.GameMode);
 
             _metrics.IncrementInFlight(_settings.QueueName);
-            await TryProcessWithRetryAsync(message, cancellationToken, activity).ConfigureAwait(false);
+            await TryProcessWithRetryAsync(message, activity, cancellationToken).ConfigureAwait(false);
 
             channel.BasicAck(args.DeliveryTag, multiple: false);
             stopwatch.Stop();
@@ -196,8 +196,8 @@ public sealed class PlayerQueueConsumer : BackgroundService
 
     private async Task TryProcessWithRetryAsync(
         PlayerEnqueuedEvent message,
-        CancellationToken cancellationToken,
-        Activity? activity)
+        Activity? activity,
+        CancellationToken cancellationToken)
     {
         var attempt = 0;
         var retryDelay = TimeSpan.FromSeconds(_settings.RetryDelaySeconds);

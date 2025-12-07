@@ -11,6 +11,14 @@ Event-driven matchmaking queue worker built with .NET 10 and RabbitMQ. The servi
 
 The worker declares the configured exchange/queue topology on startup and will log consumed player events as they are processed. There is no HTTP surface area.
 
+### Docker
+
+You can run the worker and RabbitMQ locally without installing anything extra:
+
+- Build and run: `docker compose up --build`
+- RabbitMQ management UI: http://localhost:15672 (guest/guest)
+- The worker listens for messages on `player-queue.enqueued` when the broker is healthy.
+
 ## Configuration
 
 RabbitMQ options live under the `RabbitMQ` section in `appsettings*.json`:
@@ -20,3 +28,13 @@ RabbitMQ options live under the `RabbitMQ` section in `appsettings*.json`:
 - `PrefetchCount`, `MaxRetryAttempts`, `RetryDelaySeconds`, `PublishConfirmTimeoutSeconds`
 
 All required fields are validated on host startup, and the worker stops if message processing or channel stability is compromised to preserve delivery.
+
+### Matchmaking
+
+The consumer uses a lightweight in-memory matcher to group players by region/mode. Defaults live under `Matchmaking` in `appsettings*.json`:
+
+- `TeamSize`: number of players required to form a match (default 2).
+- `MaxSkillDelta`: maximum allowed skill rating spread within a match.
+- `MaxQueueSeconds`: players waiting longer than this are dropped before matching.
+
+When a match forms, a telemetry event is emitted and queue wait durations are recorded per player.
