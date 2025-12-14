@@ -13,7 +13,10 @@ public class RabbitMQSettingsTests
             HostName = string.Empty,
             QueueName = string.Empty,
             ExchangeName = string.Empty,
-            RoutingKey = string.Empty
+            RoutingKey = string.Empty,
+            MatchResultsExchangeName = string.Empty,
+            MatchResultsQueueName = string.Empty,
+            MatchResultsRoutingKey = string.Empty
         };
 
         var results = new List<ValidationResult>();
@@ -24,6 +27,9 @@ public class RabbitMQSettingsTests
         Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.QueueName)));
         Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.ExchangeName)));
         Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.RoutingKey)));
+        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsExchangeName)));
+        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsQueueName)));
+        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsRoutingKey)));
     }
 
     [Fact]

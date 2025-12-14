@@ -53,6 +53,7 @@ public static class HostBuilderFactory
 
         services.AddSingleton<IRabbitMqConnection, RabbitMqConnection>();
         services.AddSingleton<IPlayerQueuePublisher, PlayerQueuePublisher>();
+        services.AddSingleton<IMatchResultPublisher, MatchResultPublisher>();
         services.AddSingleton<IPlayerQueueProcessor, PlayerQueueProcessor>();
         services.AddSingleton<IMatchmaker, Matchmaker>();
         services.AddSingleton<IMetricsProvider, MetricsProvider>();

@@ -25,6 +25,7 @@ RabbitMQ options live under the `RabbitMQ` section in `appsettings*.json`:
 
 - `HostName`, `Port`, `UserName`, `Password`, `VirtualHost`
 - `QueueName`, `ExchangeName`, `RoutingKey`
+- `MatchResultsExchangeName`, `MatchResultsQueueName`, `MatchResultsRoutingKey`
 - `PrefetchCount`, `MaxRetryAttempts`, `RetryDelaySeconds`, `PublishConfirmTimeoutSeconds`
 
 All required fields are validated on host startup, and the worker stops if message processing or channel stability is compromised to preserve delivery.

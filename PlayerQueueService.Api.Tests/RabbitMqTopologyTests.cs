@@ -24,4 +24,22 @@ public class RabbitMqTopologyTests
         model.Received(1).QueueDeclare(settings.QueueName, true, false, false);
         model.Received(1).QueueBind(settings.QueueName, settings.ExchangeName, settings.RoutingKey);
     }
+
+    [Fact]
+    public void EnsureMatchResultsQueue_DeclaresDurableExchangeQueueAndBinding()
+    {
+        var model = Substitute.For<IModel>();
+        var settings = new RabbitMQSettings
+        {
+            MatchResultsExchangeName = "player-match",
+            MatchResultsQueueName = "player-match.formed",
+            MatchResultsRoutingKey = "player.match.formed"
+        };
+
+        RabbitMqTopology.EnsureMatchResultsQueue(model, settings);
+
+        model.Received(1).ExchangeDeclare(settings.MatchResultsExchangeName, ExchangeType.Topic, true, false);
+        model.Received(1).QueueDeclare(settings.MatchResultsQueueName, true, false, false);
+        model.Received(1).QueueBind(settings.MatchResultsQueueName, settings.MatchResultsExchangeName, settings.MatchResultsRoutingKey);
+    }
 }

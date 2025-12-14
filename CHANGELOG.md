@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.7] - 2025-12-14
+### Added
+- Publish formed matches to a dedicated RabbitMQ exchange with confirms and tracing.
+- Match results now include a stable match id for downstream consumers.
+
 ## [0.0.6] - 2025-12-07
 ### Added
 - In-memory matchmaking with skill delta and wait-time limits plus metrics.

@@ -108,6 +108,7 @@ public sealed class Matchmaker : IMatchmaker
 
                 var averageSkill = (int)Math.Round(window.Average(player => player.SkillRating));
                 return new MatchResult(
+                    Guid.NewGuid(),
                     window,
                     window[0].Region,
                     window[0].GameMode,

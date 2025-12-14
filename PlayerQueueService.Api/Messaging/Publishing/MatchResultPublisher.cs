@@ -6,52 +6,51 @@ using PlayerQueueService.Api.Messaging.Configuration;
 using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Models.Configuration;
 using PlayerQueueService.Api.Models.Events;
+using PlayerQueueService.Api.Models.Matchmaking;
 using PlayerQueueService.Api.Telemetry;
 using Polly;
 using OpenTelemetry.Context.Propagation;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using RabbitMQ.Client.Exceptions;
+using System.Linq;
 
 namespace PlayerQueueService.Api.Messaging.Publishing;
 
-public sealed class PlayerQueuePublisher : IPlayerQueuePublisher
+public sealed class MatchResultPublisher : IMatchResultPublisher
 {
     private readonly IRabbitMqConnection _connection;
     private readonly RabbitMQSettings _settings;
-    private readonly ILogger<PlayerQueuePublisher> _logger;
-    private readonly IMetricsProvider _metrics;
+    private readonly ILogger<MatchResultPublisher> _logger;
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
-    public PlayerQueuePublisher(
+    public MatchResultPublisher(
         IRabbitMqConnection connection,
-        IOptions<RabbitMQSettings> settings,
-        ILogger<PlayerQueuePublisher> logger,
-        IMetricsProvider metrics)
+        IOptions<RabbitMQSettings> options,
+        ILogger<MatchResultPublisher> logger)
     {
         _connection = connection;
-        _settings = settings.Value;
+        _settings = options.Value;
         _logger = logger;
-        _metrics = metrics;
     }
 
-    public async Task PublishAsync(PlayerEnqueuedEvent playerEvent, CancellationToken cancellationToken = default)
+    public async Task PublishAsync(MatchResult match, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         using var activity = Tracing.ActivitySource.StartActivity(
-            "rabbitmq.publish",
+            "rabbitmq.publish.match",
             ActivityKind.Producer);
         activity?.SetTag("messaging.system", "rabbitmq");
-        activity?.SetTag("messaging.destination", _settings.ExchangeName);
-        activity?.SetTag("messaging.rabbitmq.routing_key", _settings.RoutingKey);
-        activity?.SetTag("player.id", playerEvent.PlayerId);
-        activity?.SetTag("player.region", playerEvent.Region);
-        activity?.SetTag("player.mode", playerEvent.GameMode);
+        activity?.SetTag("messaging.destination", _settings.MatchResultsExchangeName);
+        activity?.SetTag("messaging.rabbitmq.routing_key", _settings.MatchResultsRoutingKey);
+        activity?.SetTag("match.id", match.MatchId);
+        activity?.SetTag("match.region", match.Region);
+        activity?.SetTag("match.mode", match.GameMode);
 
+        var matchEvent = BuildEvent(match);
         var baseDelay = TimeSpan.FromSeconds(_settings.RetryDelaySeconds);
         var retryPolicy = Policy
-            .Handle<Exception>(IsTransientPublishException)
+            .Handle<Exception>(RabbitMqTransientExceptionClassifier.IsTransient)
             .WaitAndRetryForeverAsync(
                 attempt => TimeSpan.FromMilliseconds(
                     Math.Min(baseDelay.TotalMilliseconds * Math.Pow(2, attempt - 1), 30000)),
@@ -59,41 +58,38 @@ public sealed class PlayerQueuePublisher : IPlayerQueuePublisher
                 {
                     _logger.LogWarning(
                         exception,
-                        "Publish failed for player {PlayerId}, retrying in {Delay}",
-                        playerEvent.PlayerId,
+                        "Match publish failed for {MatchId}, retrying in {Delay}",
+                        matchEvent.MatchId,
                         delay);
                     return Task.CompletedTask;
                 });
 
-        await retryPolicy.ExecuteAsync(ct => PublishOnceAsync(playerEvent, ct), cancellationToken).ConfigureAwait(false);
+        await retryPolicy.ExecuteAsync(ct => PublishOnceAsync(matchEvent, ct), cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
-            "Published player {PlayerId} for mode {Mode} in region {Region}",
-            playerEvent.PlayerId,
-            playerEvent.GameMode,
-            playerEvent.Region);
+            "Published match {MatchId} with {Count} players to {Exchange}",
+            matchEvent.MatchId,
+            matchEvent.Players.Count,
+            _settings.MatchResultsExchangeName);
     }
 
-    private async Task PublishOnceAsync(PlayerEnqueuedEvent playerEvent, CancellationToken cancellationToken)
+    private async Task PublishOnceAsync(MatchFormedEvent matchEvent, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        _metrics.IncrementPublishAttempt(playerEvent);
 
         using var activity = Tracing.ActivitySource.StartActivity(
-            "rabbitmq.publish.attempt",
+            "rabbitmq.publish.match.attempt",
             ActivityKind.Producer);
         activity?.SetTag("messaging.system", "rabbitmq");
-        activity?.SetTag("messaging.destination", _settings.ExchangeName);
-        activity?.SetTag("messaging.rabbitmq.routing_key", _settings.RoutingKey);
-        activity?.SetTag("player.id", playerEvent.PlayerId);
-        activity?.SetTag("player.region", playerEvent.Region);
-        activity?.SetTag("player.mode", playerEvent.GameMode);
+        activity?.SetTag("messaging.destination", _settings.MatchResultsExchangeName);
+        activity?.SetTag("messaging.rabbitmq.routing_key", _settings.MatchResultsRoutingKey);
+        activity?.SetTag("match.id", matchEvent.MatchId);
 
         var stopwatch = Stopwatch.StartNew();
         try
         {
             using var channel = _connection.CreateChannel();
-            RabbitMqTopology.EnsureQueue(channel, _settings);
+            RabbitMqTopology.EnsureMatchResultsQueue(channel, _settings);
 
             var publishReturned = new TaskCompletionSource<BasicReturnEventArgs?>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -102,31 +98,22 @@ public sealed class PlayerQueuePublisher : IPlayerQueuePublisher
 
             channel.BasicReturn += OnReturn;
 
-            var body = JsonSerializer.SerializeToUtf8Bytes(playerEvent, SerializerOptions);
+            var body = JsonSerializer.SerializeToUtf8Bytes(matchEvent, SerializerOptions);
 
             var properties = channel.CreateBasicProperties();
-            properties.MessageId = playerEvent.MessageId;
+            properties.MessageId = matchEvent.MessageId;
             properties.ContentType = "application/json";
             properties.DeliveryMode = 2;
-            properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            properties.Timestamp = new AmqpTimestamp(matchEvent.MatchedAt.ToUnixTimeSeconds());
             InjectTraceContext(activity, properties);
 
             try
             {
                 channel.ConfirmSelect();
 
-                _logger.LogInformation(
-                    "Publishing player {PlayerId} for mode {Mode} in region {Region} to {Queue}",
-                    playerEvent.PlayerId,
-                    playerEvent.GameMode,
-                    playerEvent.Region,
-                    _settings.QueueName);
-
-                await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken).ConfigureAwait(false);
-
                 channel.BasicPublish(
-                    exchange: _settings.ExchangeName,
-                    routingKey: _settings.RoutingKey,
+                    exchange: _settings.MatchResultsExchangeName,
+                    routingKey: _settings.MatchResultsRoutingKey,
                     mandatory: true,
                     basicProperties: properties,
                     body: body);
@@ -140,13 +127,13 @@ public sealed class PlayerQueuePublisher : IPlayerQueuePublisher
                 {
                     var returned = await publishReturned.Task.ConfigureAwait(false);
                     throw new BrokerReturnedMessageException(
-                        $"Broker returned publish for routing key '{returned?.RoutingKey}' ({returned?.ReplyCode} - {returned?.ReplyText}).");
+                        $"Broker returned match publish for routing key '{returned?.RoutingKey}' ({returned?.ReplyCode} - {returned?.ReplyText}).");
                 }
 
                 if (!confirmed)
                 {
                     throw new TimeoutException(
-                        $"Broker did not confirm publish within {_settings.PublishConfirmTimeoutSeconds} seconds.");
+                        $"Broker did not confirm match publish within {_settings.PublishConfirmTimeoutSeconds} seconds.");
                 }
             }
             finally
@@ -157,23 +144,36 @@ public sealed class PlayerQueuePublisher : IPlayerQueuePublisher
         catch (OperationCanceledException)
         {
             activity?.SetStatus(ActivityStatusCode.Error, "canceled");
-            _metrics.IncrementPublishFailure(playerEvent, "canceled");
             throw;
         }
         catch (Exception ex)
         {
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            _metrics.IncrementPublishFailure(playerEvent, ex.GetType().Name);
             throw;
         }
         finally
         {
             stopwatch.Stop();
         }
-
-        _metrics.IncrementPublishSuccess(playerEvent);
-        _metrics.RecordPublishDuration(playerEvent, stopwatch.Elapsed.TotalMilliseconds);
     }
+
+    private static MatchFormedEvent BuildEvent(MatchResult match) =>
+        new()
+        {
+            MatchId = match.MatchId,
+            Region = match.Region,
+            GameMode = match.GameMode,
+            MatchedAt = match.MatchedAt,
+            AverageSkillRating = match.AverageSkillRating,
+            Players = match.Players
+                .Select(player => new PlayerMatchEntry
+                {
+                    PlayerId = player.PlayerId,
+                    SkillRating = player.SkillRating,
+                    RequestedAt = player.RequestedAt
+                })
+                .ToArray()
+        };
 
     private static void InjectTraceContext(Activity? activity, IBasicProperties properties)
     {
@@ -204,7 +204,4 @@ public sealed class PlayerQueuePublisher : IPlayerQueuePublisher
             properties.Headers[kvp.Key] = Encoding.UTF8.GetBytes(kvp.Value);
         }
     }
-
-    private static bool IsTransientPublishException(Exception exception) =>
-        RabbitMqTransientExceptionClassifier.IsTransient(exception);
 }

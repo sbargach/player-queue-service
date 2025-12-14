@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using PlayerQueueService.Api.Messaging.Publishing;
 using PlayerQueueService.Api.Models.Events;
 using PlayerQueueService.Api.Models.Matchmaking;
 using PlayerQueueService.Api.Services;
@@ -14,7 +15,8 @@ public class PlayerQueueProcessorTests
         var matchmaker = Substitute.For<IMatchmaker>();
         matchmaker.EnqueueAsync(Arg.Any<PlayerEnqueuedEvent>(), Arg.Any<CancellationToken>())
             .Returns((MatchResult?)null);
-        var processor = new PlayerQueueProcessor(matchmaker, NullLogger<PlayerQueueProcessor>.Instance);
+        var publisher = Substitute.For<IMatchResultPublisher>();
+        var processor = new PlayerQueueProcessor(matchmaker, publisher, NullLogger<PlayerQueueProcessor>.Instance);
         var playerEvent = new PlayerEnqueuedEvent
         {
             PlayerId = Guid.NewGuid(),
@@ -32,7 +34,8 @@ public class PlayerQueueProcessorTests
     public async Task ProcessAsync_ThrowsWhenCancellationRequested()
     {
         var matchmaker = Substitute.For<IMatchmaker>();
-        var processor = new PlayerQueueProcessor(matchmaker, NullLogger<PlayerQueueProcessor>.Instance);
+        var publisher = Substitute.For<IMatchResultPublisher>();
+        var processor = new PlayerQueueProcessor(matchmaker, publisher, NullLogger<PlayerQueueProcessor>.Instance);
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
@@ -44,14 +47,16 @@ public class PlayerQueueProcessorTests
     public async Task ProcessAsync_LogsWhenMatchIsFormed()
     {
         var matchmaker = Substitute.For<IMatchmaker>();
+        var publisher = Substitute.For<IMatchResultPublisher>();
         var player = new PlayerEnqueuedEvent { PlayerId = Guid.NewGuid(), Region = "eu", GameMode = "trios", SkillRating = 1200 };
-        var match = new MatchResult(new[] { player }, player.Region, player.GameMode, DateTimeOffset.UtcNow, player.SkillRating);
+        var match = new MatchResult(Guid.NewGuid(), new[] { player }, player.Region, player.GameMode, DateTimeOffset.UtcNow, player.SkillRating);
         matchmaker.EnqueueAsync(player, Arg.Any<CancellationToken>()).Returns(match);
 
-        var processor = new PlayerQueueProcessor(matchmaker, NullLogger<PlayerQueueProcessor>.Instance);
+        var processor = new PlayerQueueProcessor(matchmaker, publisher, NullLogger<PlayerQueueProcessor>.Instance);
 
         await processor.ProcessAsync(player);
 
         await matchmaker.Received(1).EnqueueAsync(player, Arg.Any<CancellationToken>());
+        await publisher.Received(1).PublishAsync(match, Arg.Any<CancellationToken>());
     }
 }

@@ -53,6 +53,24 @@ public sealed record RabbitMQSettings
     public string RoutingKey { get; init; } = "player.queue.enqueued";
 
     /// <summary>
+    /// Name of the exchange used for match result events.
+    /// </summary>
+    [Required]
+    public string MatchResultsExchangeName { get; init; } = "player-match";
+
+    /// <summary>
+    /// Name of the queue that receives match result events.
+    /// </summary>
+    [Required]
+    public string MatchResultsQueueName { get; init; } = "player-match.formed";
+
+    /// <summary>
+    /// Routing key used when publishing match result events.
+    /// </summary>
+    [Required]
+    public string MatchResultsRoutingKey { get; init; } = "player.match.formed";
+
+    /// <summary>
     /// Maximum number of messages the consumer will prefetch.
     /// </summary>
     [Range(1, 1000)]
