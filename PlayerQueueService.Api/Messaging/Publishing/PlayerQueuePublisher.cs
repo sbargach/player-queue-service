@@ -49,23 +49,24 @@ public sealed class PlayerQueuePublisher : IPlayerQueuePublisher
         activity?.SetTag("player.region", playerEvent.Region);
         activity?.SetTag("player.mode", playerEvent.GameMode);
 
-        var baseDelay = TimeSpan.FromSeconds(_settings.RetryDelaySeconds);
         var retryPolicy = Policy
             .Handle<Exception>(IsTransientPublishException)
-            .WaitAndRetryForeverAsync(
-                attempt => TimeSpan.FromMilliseconds(
-                    Math.Min(baseDelay.TotalMilliseconds * Math.Pow(2, attempt - 1), 30000)),
-                (exception, delay) =>
+            .RetryForeverAsync(
+                async (exception, attempt, _) =>
                 {
-                    _logger.LogWarning(
+                    _logger.LogError(
                         exception,
-                        "Publish failed for player {PlayerId}, retrying in {Delay}",
+                        "Publishing {PlayerId} to RabbitMQ queue {QueueName} resulted in an error. Retrying attempt {Attempt}",
                         playerEvent.PlayerId,
-                        delay);
-                    return Task.CompletedTask;
+                        _settings.QueueName,
+                        attempt);
+                    _metrics.IncrementPublishRetry(playerEvent, _settings.QueueName);
+                    await Task.Delay(TimeSpan.FromMilliseconds(1000), cancellationToken).ConfigureAwait(false);
                 });
 
-        await retryPolicy.ExecuteAsync(ct => PublishOnceAsync(playerEvent, ct), cancellationToken).ConfigureAwait(false);
+        await retryPolicy
+            .ExecuteAsync((_, ct) => PublishOnceAsync(playerEvent, ct), new Context("rabbitmq-publisher"), cancellationToken)
+            .ConfigureAwait(false);
 
         _logger.LogInformation(
             "Published player {PlayerId} for mode {Mode} in region {Region}",

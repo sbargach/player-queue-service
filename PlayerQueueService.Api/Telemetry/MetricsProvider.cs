@@ -1,5 +1,8 @@
 using System.Diagnostics.Metrics;
 using System.Linq;
+using System.Reflection;
+using Microsoft.Extensions.Options;
+using PlayerQueueService.Api.Models.Configuration;
 using PlayerQueueService.Api.Models.Events;
 using PlayerQueueService.Api.Models.Matchmaking;
 
@@ -11,9 +14,11 @@ public sealed class MetricsProvider : IMetricsProvider
     private readonly Counter<long> _publishAttempts;
     private readonly Counter<long> _publishFailures;
     private readonly Counter<long> _publishSuccesses;
+    private readonly Counter<long> _publishRetries;
     private readonly Counter<long> _processingFailures;
     private readonly Counter<long> _processingSuccesses;
     private readonly Counter<long> _processingRetries;
+    private readonly Counter<long> _processedEntries;
     private readonly Counter<long> _matchesFormed;
     private readonly Histogram<double> _publishDuration;
     private readonly Histogram<double> _processingDuration;
@@ -21,15 +26,20 @@ public sealed class MetricsProvider : IMetricsProvider
     private readonly UpDownCounter<long> _inFlightProcessing;
     private bool _disposed;
 
-    public MetricsProvider()
+    public MetricsProvider(IOptions<TelemetryOptions> options)
     {
-        _meter = new Meter("player_queue_service", "1.0.0");
+        var telemetry = options.Value;
+        var meterVersion = telemetry.ServiceVersion ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString();
+
+        _meter = new Meter(telemetry.MeterName, meterVersion);
         _publishAttempts = _meter.CreateCounter<long>("playerqueue.publish.attempts", description: "Messages attempted to publish.");
         _publishFailures = _meter.CreateCounter<long>("playerqueue.publish.failures", description: "Failed publish attempts.");
         _publishSuccesses = _meter.CreateCounter<long>("playerqueue.publish.successes", description: "Successfully published messages.");
+        _publishRetries = _meter.CreateCounter<long>("playerqueue.publish.retries", description: "Publish retries triggered by failures.");
         _processingFailures = _meter.CreateCounter<long>("playerqueue.consume.failures", description: "Failed message processing attempts.");
         _processingSuccesses = _meter.CreateCounter<long>("playerqueue.consume.successes", description: "Successfully processed messages.");
         _processingRetries = _meter.CreateCounter<long>("playerqueue.consume.retries", description: "Processing retries triggered by failures.");
+        _processedEntries = _meter.CreateCounter<long>("playerqueue.processed.entries", description: "Entries processed from the queue.");
         _matchesFormed = _meter.CreateCounter<long>("playerqueue.match.formed", description: "Matches successfully formed.");
         _publishDuration = _meter.CreateHistogram<double>("playerqueue.publish.duration.ms", unit: "ms", description: "Duration of publish operations.");
         _processingDuration = _meter.CreateHistogram<double>("playerqueue.consume.duration.ms", unit: "ms", description: "Duration of consume operations.");
@@ -49,8 +59,14 @@ public sealed class MetricsProvider : IMetricsProvider
     public void RecordPublishDuration(PlayerEnqueuedEvent playerEvent, double milliseconds) =>
         _publishDuration.Record(milliseconds, BuildTags(playerEvent));
 
+    public void IncrementPublishRetry(PlayerEnqueuedEvent playerEvent, string queueName) =>
+        _publishRetries.Add(1, BuildTags(playerEvent, queueName));
+
     public void IncrementProcessingRetry(PlayerEnqueuedEvent playerEvent, string queueName) =>
         _processingRetries.Add(1, BuildTags(playerEvent, queueName));
+
+    public void IncrementProcessed(PlayerEnqueuedEvent playerEvent, string queueName) =>
+        _processedEntries.Add(1, BuildTags(playerEvent, queueName));
 
     public void IncrementConsumeSuccess(PlayerEnqueuedEvent playerEvent, string queueName) =>
         _processingSuccesses.Add(1, BuildTags(playerEvent, queueName));

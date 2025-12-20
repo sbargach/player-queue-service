@@ -128,6 +128,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
 
             channel.BasicAck(args.DeliveryTag, multiple: false);
             stopwatch.Stop();
+            _metrics.IncrementProcessed(message, _settings.QueueName);
             _metrics.IncrementConsumeSuccess(message, _settings.QueueName);
             _metrics.RecordConsumeDuration(message, stopwatch.Elapsed.TotalMilliseconds, _settings.QueueName);
             activity?.SetStatus(ActivityStatusCode.Ok);

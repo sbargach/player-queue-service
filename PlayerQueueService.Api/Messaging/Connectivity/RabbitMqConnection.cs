@@ -36,6 +36,16 @@ public sealed class RabbitMqConnection : IRabbitMqConnection
         }
     }
 
+    public Task ConnectAsync(CancellationToken cancellationToken = default) =>
+        Task.Run(
+            () =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                EnsureConnection();
+                return _connection!;
+            },
+            cancellationToken);
+
     public IModel CreateChannel()
     {
         EnsureConnection();

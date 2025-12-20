@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.8] - 2025-12-20
+### Added
+- OTLP telemetry configuration with meter name/version, optional tracing endpoint, and startup logging of application version.
+- Metrics provider counters for publish retries and processed entries plus RabbitMQ publisher infinite retry logging with tracing.
+- RabbitMQ consumer/publisher health checks.
+
 ## [0.0.7] - 2025-12-14
 ### Added
 - Publish formed matches to a dedicated RabbitMQ exchange with confirms and tracing.
