@@ -132,9 +132,9 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
             _channel.ExchangeDeclare(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>());
             _channel.QueueDeclare(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>()).Returns(new QueueDeclareOk("queue", 0, 0));
             _channel.QueueBind(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IDictionary<string, object>>());
-            _channel.BasicConsume(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<IBasicConsumer>()).Returns(ci =>
+            _channel.BasicConsume(default!, default, default!).ReturnsForAnyArgs(ci =>
             {
-                _consumer = ci.Arg<IBasicConsumer>() as AsyncEventingBasicConsumer;
+                _consumer = ci.ArgAt<IBasicConsumer>(2) as AsyncEventingBasicConsumer;
                 if (_consumer is not null)
                 {
                     _consumerReady.TrySetResult(_consumer);
@@ -142,12 +142,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
                 return "consumer-tag";
             });
 
-            _channel.When(c => c.BasicPublish(
-                Arg.Any<string>(),
-                Arg.Any<string>(),
-                Arg.Any<bool>(),
-                Arg.Any<IBasicProperties>(),
-                Arg.Any<ReadOnlyMemory<byte>>()))
+            _channel.WhenForAnyArgs(c => c.BasicPublish(default!, default!, default, default!, default))
                 .Do(ci =>
                 {
                     var capture = new PublishCapture(
