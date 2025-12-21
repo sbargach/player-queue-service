@@ -11,6 +11,7 @@ using PlayerQueueService.Api.Models.Events;
 using PlayerQueueService.Api.Services;
 using PlayerQueueService.Api.Telemetry;
 using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 
 namespace PlayerQueueService.Api.Tests;
 
