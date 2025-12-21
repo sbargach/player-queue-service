@@ -129,7 +129,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
             _channel.IsOpen.Returns(true);
             _channel.CreateBasicProperties().Returns(Substitute.For<IBasicProperties>());
             _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(true);
-            _channel.ExchangeDeclare(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>()).Returns(new ExchangeDeclareOk());
+            _channel.ExchangeDeclare(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>());
             _channel.QueueDeclare(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>()).Returns(new QueueDeclareOk("queue", 0, 0));
             _channel.QueueBind(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IDictionary<string, object>>());
             _channel.BasicConsume(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<IBasicConsumer>()).Returns(ci =>
