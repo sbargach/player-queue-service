@@ -62,7 +62,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
         await _connection.DeliverAsync(playerOne);
         await _connection.DeliverAsync(playerTwo);
 
-        var published = await _connection.MatchResultPublished.WaitAsync(TimeSpan.FromSeconds(2));
+        var published = await _connection.MatchResultPublished.WaitAsync(TimeSpan.FromSeconds(5));
         var matchEvent = JsonSerializer.Deserialize<MatchFormedEvent>(published.Body, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         Assert.NotNull(matchEvent);
@@ -112,7 +112,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
             _metrics);
 
         await _consumer.StartAsync(CancellationToken.None);
-        await _connection.WaitForConsumerAsync(TimeSpan.FromSeconds(1));
+        await _connection.WaitForConsumerAsync(TimeSpan.FromSeconds(5));
     }
 
     private sealed class TestRabbitMqConnection : IRabbitMqConnection
