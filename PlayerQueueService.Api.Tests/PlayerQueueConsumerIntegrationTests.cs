@@ -127,7 +127,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
         {
             _settings = settings;
             _channel.IsOpen.Returns(true);
-            _channel.CreateBasicProperties().Returns(new RabbitMQ.Client.Framing.BasicProperties());
+            _channel.CreateBasicProperties().Returns(Substitute.For<IBasicProperties>());
             _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(true);
             _channel.ExchangeDeclare(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>()).Returns(new ExchangeDeclareOk());
             _channel.QueueDeclare(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>()).Returns(new QueueDeclareOk("queue", 0, 0));
@@ -180,7 +180,8 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
             }
 
             var body = JsonSerializer.SerializeToUtf8Bytes(playerEvent, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            var props = new RabbitMQ.Client.Framing.BasicProperties { Headers = new Dictionary<string, object?>() };
+            var props = Substitute.For<IBasicProperties>();
+            props.Headers = new Dictionary<string, object?>();
 
             await _consumer!.HandleBasicDeliver(
                 consumerTag: "consumer-tag",
