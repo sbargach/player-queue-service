@@ -23,7 +23,7 @@ jobs:
         run: dotnet build PlayerQueueService.Api/PlayerQueueService.Api.csproj --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test PlayerQueueService.Api.Tests/PlayerQueueService.Api.Tests.csproj --no-build --configuration Release --logger "trx;LogFileName=unit-tests.trx" --results-directory TestResults
+        run: dotnet test PlayerQueueService.Api.Tests/PlayerQueueService.Api.Tests.csproj --configuration Release --logger "trx;LogFileName=unit-tests.trx" --results-directory TestResults
 
       - name: Publish test results
         if: always()

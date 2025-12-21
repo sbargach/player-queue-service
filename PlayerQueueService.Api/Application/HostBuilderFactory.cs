@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OpenTelemetry.Exporter;
@@ -33,7 +36,23 @@ public static class HostBuilderFactory
                 ConfigureRabbitMQ(context, services);
                 ConfigureMatchmaking(context, services);
                 ConfigureTelemetry(context, services);
+                services.AddRouting();
                 services.AddHostedService<PlayerQueueConsumer>();
+            })
+            .ConfigureWebHostDefaults(webBuilder =>
+            {
+                webBuilder.Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseEndpoints(endpoints =>
+                    {
+                        endpoints.MapHealthChecks("/health/live", new HealthCheckOptions
+                        {
+                            Predicate = _ => false
+                        });
+                        endpoints.MapHealthChecks("/health/ready");
+                    });
+                });
             });
 
     private static void ConfigureRabbitMQ(HostBuilderContext context, IServiceCollection services)

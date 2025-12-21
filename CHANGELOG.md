@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.9] - 2025-12-22
+- Added live/ready health probes via ASP.NET Core endpoints.
+- Added an end-to-end consume → match → publish integration test with stubbed RabbitMQ.
+- CI builds tests before running; base appsettings is Serilog-only with development defaults in `appsettings.Development.json`.
+
 ## [0.0.8] - 2025-12-20
 ### Added
 - OTLP telemetry configuration with meter name/version, optional tracing endpoint, and startup logging of application version.

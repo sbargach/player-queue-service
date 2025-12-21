@@ -1,6 +1,6 @@
 # player-queue-service
 
-Event-driven matchmaking queue worker built with .NET 10 and RabbitMQ. The service runs as a generic host with a background consumer that processes player queue events using durable queues, manual acknowledgements, and configuration validation at startup.
+Event-driven matchmaking queue worker built with .NET 10 and RabbitMQ. The service runs as a generic host with a background consumer that processes player queue events using durable queues, manual acknowledgements, configuration validation at startup, and minimal HTTP surface area (health probes only).
 
 ## Running locally
 
@@ -18,8 +18,11 @@ You can run the worker and RabbitMQ locally without installing anything extra:
 - Build and run: `docker compose up --build`
 - RabbitMQ management UI: http://localhost:15672 (guest/guest)
 - The worker listens for messages on `player-queue.enqueued` when the broker is healthy.
+- Health probes: `/health/live` (always up) and `/health/ready` (wires publisher/consumer checks) on port 8080.
 
 ## Configuration
+
+The base `appsettings.json` keeps only Serilog settings; local development defaults (RabbitMQ, telemetry, matchmaking) live in `appsettings.Development.json`. All options can still be overridden via environment variables.
 
 RabbitMQ options live under the `RabbitMQ` section in `appsettings*.json`:
 
