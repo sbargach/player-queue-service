@@ -189,7 +189,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
                 redelivered: false,
                 exchange: _settings.ExchangeName,
                 routingKey: _settings.RoutingKey,
-                basicProperties: props,
+                properties: props,
                 body: body);
         }
 
