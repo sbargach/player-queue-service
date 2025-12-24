@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -168,6 +169,15 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
             channel.BasicConsume(default!, default, default!).ReturnsForAnyArgs(ci =>
             {
                 _consumer = ci.ArgAt<IBasicConsumer>(2) as AsyncEventingBasicConsumer;
+                if (_consumer is not null)
+                {
+                    _consumerReady.TrySetResult(_consumer);
+                }
+                return "consumer-tag";
+            });
+            channel.BasicConsume(default!, default, default!, default!, default!, default!, default!).ReturnsForAnyArgs(ci =>
+            {
+                _consumer = ci.ArgAt<IBasicConsumer>(6) as AsyncEventingBasicConsumer;
                 if (_consumer is not null)
                 {
                     _consumerReady.TrySetResult(_consumer);
