@@ -16,13 +16,14 @@ namespace PlayerQueueService.Api.Tests;
 
 public class PlayerQueuePublisherTests
 {
-    private readonly IRabbitMqConnection _connection;
-    private readonly IModel _channel;
-    private readonly IBasicProperties _properties;
-    private readonly RabbitMQSettings _settings;
-    private readonly IMetricsProvider _metrics;
+    private IRabbitMqConnection _connection = null!;
+    private IModel _channel = null!;
+    private IBasicProperties _properties = null!;
+    private RabbitMQSettings _settings = null!;
+    private IMetricsProvider _metrics = null!;
 
-    public PlayerQueuePublisherTests()
+    [SetUp]
+    public void SetUp()
     {
         _connection = Substitute.For<IRabbitMqConnection>();
         _channel = Substitute.For<IModel>();
