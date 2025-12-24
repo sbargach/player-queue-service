@@ -1,13 +1,12 @@
-using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Messaging.Consumers;
-using PlayerQueueService.Api.Messaging.Publishing;
 using PlayerQueueService.Api.Models.Configuration;
 using PlayerQueueService.Api.Models.Events;
+using PlayerQueueService.Api.Models.Matchmaking;
 using PlayerQueueService.Api.Services;
 using PlayerQueueService.Api.Telemetry;
 using RabbitMQ.Client;
@@ -31,6 +30,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
 
     private readonly TestRabbitMqConnection _connection;
     private readonly IMetricsProvider _metrics = Substitute.For<IMetricsProvider>();
+    private readonly CapturingMatchResultPublisher _publisher = new();
     private PlayerQueueConsumer? _consumer;
 
     public PlayerQueueConsumerIntegrationTests()
@@ -63,15 +63,12 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
         await _connection.DeliverAsync(playerOne);
         await _connection.DeliverAsync(playerTwo);
 
-        var published = await _connection.MatchResultPublished.WaitAsync(TimeSpan.FromSeconds(5));
-        var matchEvent = JsonSerializer.Deserialize<MatchFormedEvent>(published.Body, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var match = await _publisher.MatchPublished.WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.NotNull(matchEvent);
-        Assert.Equal(_settings.MatchResultsExchangeName, published.Exchange);
-        Assert.Equal(_settings.MatchResultsRoutingKey, published.RoutingKey);
-        Assert.Equal(2, matchEvent!.Players.Count);
-        Assert.Equal(playerOne.Region, matchEvent.Region);
-        Assert.Equal(playerOne.GameMode, matchEvent.GameMode);
+        Assert.NotNull(match);
+        Assert.Equal(2, match!.Players.Count);
+        Assert.Equal(playerOne.Region, match.Region);
+        Assert.Equal(playerOne.GameMode, match.GameMode);
     }
 
     public async Task InitializeAsync()
@@ -94,14 +91,9 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
             _metrics,
             NullLogger<Matchmaker>.Instance);
 
-        var matchResultPublisher = new MatchResultPublisher(
-            _connection,
-            Options.Create(_settings),
-            NullLogger<MatchResultPublisher>.Instance);
-
         var processor = new PlayerQueueProcessor(
             matchmaker,
-            matchResultPublisher,
+            _publisher,
             NullLogger<PlayerQueueProcessor>.Instance);
 
         _consumer = new PlayerQueueConsumer(
@@ -119,30 +111,19 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
     private sealed class TestRabbitMqConnection : IRabbitMqConnection
     {
         private readonly RabbitMQSettings _settings;
-        private readonly IModel _consumerChannel = Substitute.For<IModel>();
-        private bool _consumerChannelCreated;
+        private readonly IModel _channel = Substitute.For<IModel>();
         private AsyncEventingBasicConsumer? _consumer;
         private readonly TaskCompletionSource<AsyncEventingBasicConsumer> _consumerReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource<PublishCapture> _publishReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TestRabbitMqConnection(RabbitMQSettings settings)
         {
             _settings = settings;
-            ConfigureConsumerChannel(_consumerChannel);
+            ConfigureConsumerChannel(_channel);
         }
 
         public Task ConnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        public IModel CreateChannel()
-        {
-            if (!_consumerChannelCreated)
-            {
-                _consumerChannelCreated = true;
-                return _consumerChannel;
-            }
-
-            return CreatePublishChannel();
-        }
+        public IModel CreateChannel() => _channel;
 
         public void Dispose()
         {
@@ -175,8 +156,6 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
                 body: body);
         }
 
-        public Task<PublishCapture> MatchResultPublished => _publishReady.Task;
-
         private void ConfigureConsumerChannel(IModel channel)
         {
             channel.IsOpen.Returns(true);
@@ -195,29 +174,6 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
                 return "consumer-tag";
             });
         }
-
-        private IModel CreatePublishChannel()
-        {
-            var publishChannel = Substitute.For<IModel>();
-            publishChannel.IsOpen.Returns(true);
-            publishChannel.CreateBasicProperties().Returns(Substitute.For<IBasicProperties>());
-            publishChannel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(true);
-            publishChannel.ExchangeDeclare(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>());
-            publishChannel.QueueDeclare(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>()).Returns(new QueueDeclareOk("queue", 0, 0));
-            publishChannel.QueueBind(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IDictionary<string, object>>());
-
-            publishChannel.WhenForAnyArgs(c => c.BasicPublish(default!, default!, default, default!, default))
-                .Do(ci =>
-                {
-                    var capture = new PublishCapture(
-                        ci.ArgAt<string>(0),
-                        ci.ArgAt<string>(1),
-                        ci.ArgAt<ReadOnlyMemory<byte>>(4).ToArray());
-                    _publishReady.TrySetResult(capture);
-                });
-
-            return publishChannel;
-        }
     }
 
     private sealed class TestHostApplicationLifetime : IHostApplicationLifetime
@@ -231,5 +187,16 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
         public void StopApplication() => _stopping.Cancel();
     }
 
-    private sealed record PublishCapture(string Exchange, string RoutingKey, byte[] Body);
+    private sealed class CapturingMatchResultPublisher : IMatchResultPublisher
+    {
+        private readonly TaskCompletionSource<MatchResult> _published = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task PublishAsync(MatchResult match, CancellationToken cancellationToken = default)
+        {
+            _published.TrySetResult(match);
+            return Task.CompletedTask;
+        }
+
+        public Task<MatchResult> MatchPublished => _published.Task;
+    }
 }
