@@ -5,6 +5,8 @@ using PlayerQueueService.Api.Models.Configuration;
 using PlayerQueueService.Api.Models.Events;
 using PlayerQueueService.Api.Services;
 using PlayerQueueService.Api.Telemetry;
+using NUnit.Framework;
+using Shouldly;
 
 namespace PlayerQueueService.Api.Tests;
 
@@ -18,7 +20,7 @@ public class MatchmakerTests
         MaxQueueSeconds = 60
     };
 
-    [Fact]
+    [Test]
     public async Task EnqueueAsync_FormsMatchWhenEnoughPlayersWithinDelta()
     {
         var matchmaker = CreateMatchmaker();
@@ -26,17 +28,17 @@ public class MatchmakerTests
         var playerTwo = BuildPlayer(1120);
 
         var result = await matchmaker.EnqueueAsync(playerOne);
-        Assert.Null(result);
+        result.ShouldBeNull();
 
         result = await matchmaker.EnqueueAsync(playerTwo);
 
-        Assert.NotNull(result);
-        Assert.Equal(2, result!.Players.Count);
+        result.ShouldNotBeNull();
+        result!.Players.Count.ShouldBe(2);
         _metrics.Received().IncrementMatchFormed(result);
         _metrics.Received().RecordQueueWait(result);
     }
 
-    [Fact]
+    [Test]
     public async Task EnqueueAsync_DoesNotMatchWhenSkillGapTooLarge()
     {
         var matchmaker = CreateMatchmaker();
@@ -44,15 +46,15 @@ public class MatchmakerTests
         var playerTwo = BuildPlayer(1200);
 
         var result = await matchmaker.EnqueueAsync(playerOne);
-        Assert.Null(result);
+        result.ShouldBeNull();
 
         result = await matchmaker.EnqueueAsync(playerTwo);
 
-        Assert.Null(result);
+        result.ShouldBeNull();
         _metrics.DidNotReceive().IncrementMatchFormed(Arg.Any<Models.Matchmaking.MatchResult>());
     }
 
-    [Fact]
+    [Test]
     public async Task EnqueueAsync_DropsExpiredPlayersBeforeMatching()
     {
         var matchmaker = CreateMatchmaker();
@@ -64,8 +66,8 @@ public class MatchmakerTests
         await matchmaker.EnqueueAsync(recentPlayerOne);
         var result = await matchmaker.EnqueueAsync(recentPlayerTwo);
 
-        Assert.NotNull(result);
-        Assert.DoesNotContain(stalePlayer, result!.Players);
+        result.ShouldNotBeNull();
+        result!.Players.ShouldNotContain(stalePlayer);
     }
 
     private Matchmaker CreateMatchmaker() =>

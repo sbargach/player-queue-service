@@ -1,11 +1,13 @@
 using System.ComponentModel.DataAnnotations;
+using NUnit.Framework;
 using PlayerQueueService.Api.Models.Configuration;
+using Shouldly;
 
 namespace PlayerQueueService.Api.Tests;
 
 public class RabbitMQSettingsTests
 {
-    [Fact]
+    [Test]
     public void ValidationFailsWhenRequiredFieldsAreMissing()
     {
         var settings = new RabbitMQSettings
@@ -22,17 +24,17 @@ public class RabbitMQSettingsTests
         var results = new List<ValidationResult>();
         var isValid = Validator.TryValidateObject(settings, new ValidationContext(settings), results, validateAllProperties: true);
 
-        Assert.False(isValid);
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.HostName)));
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.QueueName)));
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.ExchangeName)));
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.RoutingKey)));
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsExchangeName)));
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsQueueName)));
-        Assert.Contains(results, r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsRoutingKey)));
+        isValid.ShouldBeFalse();
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.HostName)));
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.QueueName)));
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.ExchangeName)));
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.RoutingKey)));
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsExchangeName)));
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsQueueName)));
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsRoutingKey)));
     }
 
-    [Fact]
+    [Test]
     public void ValidationPassesWithDefaults()
     {
         var settings = new RabbitMQSettings();
@@ -40,14 +42,13 @@ public class RabbitMQSettingsTests
 
         var isValid = Validator.TryValidateObject(settings, new ValidationContext(settings), results, validateAllProperties: true);
 
-        Assert.True(isValid);
-        Assert.Empty(results);
+        isValid.ShouldBeTrue();
+        results.ShouldBeEmpty();
     }
 
-    [Theory]
-    [InlineData(0, 2, 5)]
-    [InlineData(3, 0, 5)]
-    [InlineData(3, 2, 0)]
+    [TestCase(0, 2, 5)]
+    [TestCase(3, 0, 5)]
+    [TestCase(3, 2, 0)]
     public void ValidationFailsWhenRetryOrConfirmationSettingsAreInvalid(
         int maxRetryAttempts,
         int retryDelaySeconds,
@@ -63,6 +64,6 @@ public class RabbitMQSettingsTests
         var results = new List<ValidationResult>();
         var isValid = Validator.TryValidateObject(settings, new ValidationContext(settings), results, validateAllProperties: true);
 
-        Assert.False(isValid);
+        isValid.ShouldBeFalse();
     }
 }

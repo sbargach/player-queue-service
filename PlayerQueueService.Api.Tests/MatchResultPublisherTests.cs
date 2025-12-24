@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using NSubstitute.Core;
+using NUnit.Framework;
 using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Messaging.Publishing;
 using PlayerQueueService.Api.Models.Configuration;
@@ -9,6 +10,7 @@ using PlayerQueueService.Api.Models.Events;
 using PlayerQueueService.Api.Models.Matchmaking;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using Shouldly;
 
 namespace PlayerQueueService.Api.Tests;
 
@@ -41,7 +43,7 @@ public class MatchResultPublisherTests
         _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(true);
     }
 
-    [Fact]
+    [Test]
     public async Task PublishAsync_RetriesUntilCancelled_WhenConfirmationTimesOut()
     {
         _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(false);
@@ -52,13 +54,13 @@ public class MatchResultPublisherTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+        await Should.ThrowAsync<OperationCanceledException>(
             () => publisher.PublishAsync(BuildMatch(), cts.Token));
 
         _channel.Received().ConfirmSelect();
     }
 
-    [Fact]
+    [Test]
     public async Task PublishAsync_ThrowsWhenMessageIsReturned()
     {
         _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(InvokeBasicReturn());
@@ -67,7 +69,7 @@ public class MatchResultPublisherTests
             Options.Create(_settings),
             NullLogger<MatchResultPublisher>.Instance);
 
-        await Assert.ThrowsAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(BuildMatch()));
+        await Should.ThrowAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(BuildMatch()));
 
         _channel.Received(1).BasicPublish(
             _settings.MatchResultsExchangeName,

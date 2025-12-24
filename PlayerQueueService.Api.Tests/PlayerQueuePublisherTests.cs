@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using NSubstitute.Core;
+using NUnit.Framework;
 using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Messaging.Publishing;
 using PlayerQueueService.Api.Models.Configuration;
@@ -9,6 +10,7 @@ using PlayerQueueService.Api.Models.Events;
 using PlayerQueueService.Api.Telemetry;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using Shouldly;
 
 namespace PlayerQueueService.Api.Tests;
 
@@ -40,7 +42,7 @@ public class PlayerQueuePublisherTests
         _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(true);
     }
 
-    [Fact]
+    [Test]
     public async Task PublishAsync_RetriesUntilCancelled_WhenConfirmationTimesOut()
     {
         _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(false);
@@ -53,13 +55,13 @@ public class PlayerQueuePublisherTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+        await Should.ThrowAsync<OperationCanceledException>(
             () => publisher.PublishAsync(new PlayerEnqueuedEvent(), cts.Token));
 
         _channel.Received().ConfirmSelect();
     }
 
-    [Fact]
+    [Test]
     public async Task PublishAsync_ThrowsWhenMessageIsReturned()
     {
         _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(InvokeBasicReturn());
@@ -70,7 +72,7 @@ public class PlayerQueuePublisherTests
             NullLogger<PlayerQueuePublisher>.Instance,
             _metrics);
 
-        await Assert.ThrowsAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(new PlayerEnqueuedEvent()));
+        await Should.ThrowAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(new PlayerEnqueuedEvent()));
 
         _channel.Received(1).BasicPublish(
             _settings.ExchangeName,
@@ -80,7 +82,7 @@ public class PlayerQueuePublisherTests
             Arg.Any<ReadOnlyMemory<byte>>());
     }
 
-    [Fact]
+    [Test]
     public async Task PublishAsync_DoesNotRetryOnBrokerReturn()
     {
         _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(InvokeBasicReturn());
@@ -91,12 +93,12 @@ public class PlayerQueuePublisherTests
             NullLogger<PlayerQueuePublisher>.Instance,
             _metrics);
 
-        await Assert.ThrowsAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(new PlayerEnqueuedEvent()));
+        await Should.ThrowAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(new PlayerEnqueuedEvent()));
 
         _connection.Received(1).CreateChannel();
     }
 
-    [Fact]
+    [Test]
     public async Task PublishAsync_RecordsMetricsOnSuccess()
     {
         var playerEvent = new PlayerEnqueuedEvent { GameMode = "trios", Region = "eu" };
@@ -114,7 +116,7 @@ public class PlayerQueuePublisherTests
         _metrics.DidNotReceive().IncrementPublishFailure(Arg.Any<PlayerEnqueuedEvent>(), Arg.Any<string>());
     }
 
-    [Fact]
+    [Test]
     public async Task PublishAsync_RecordsFailureMetricOnBrokerReturn()
     {
         _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(InvokeBasicReturn());
@@ -126,7 +128,7 @@ public class PlayerQueuePublisherTests
             NullLogger<PlayerQueuePublisher>.Instance,
             _metrics);
 
-        await Assert.ThrowsAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(playerEvent));
+        await Should.ThrowAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(playerEvent));
 
         _metrics.Received(1).IncrementPublishAttempt(playerEvent);
         _metrics.Received(1).IncrementPublishFailure(playerEvent, nameof(BrokerReturnedMessageException));

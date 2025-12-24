@@ -1,4 +1,5 @@
 using NSubstitute;
+using NUnit.Framework;
 using PlayerQueueService.Api.Messaging.Configuration;
 using PlayerQueueService.Api.Models.Configuration;
 using RabbitMQ.Client;
@@ -7,7 +8,7 @@ namespace PlayerQueueService.Api.Tests;
 
 public class RabbitMqTopologyTests
 {
-    [Fact]
+    [Test]
     public void EnsureQueue_DeclaresDurableExchangeQueueAndBinding()
     {
         var model = Substitute.For<IModel>();
@@ -25,7 +26,7 @@ public class RabbitMqTopologyTests
         model.Received(1).QueueBind(settings.QueueName, settings.ExchangeName, settings.RoutingKey);
     }
 
-    [Fact]
+    [Test]
     public void EnsureMatchResultsQueue_DeclaresDurableExchangeQueueAndBinding()
     {
         var model = Substitute.For<IModel>();

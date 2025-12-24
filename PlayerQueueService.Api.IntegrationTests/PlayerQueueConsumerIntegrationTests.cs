@@ -12,8 +12,9 @@ using PlayerQueueService.Api.Services;
 using PlayerQueueService.Api.Telemetry;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using Xunit;
 
-namespace PlayerQueueService.Api.Tests;
+namespace PlayerQueueService.Api.IntegrationTests;
 
 public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
 {
@@ -118,7 +119,8 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
     private sealed class TestRabbitMqConnection : IRabbitMqConnection
     {
         private readonly RabbitMQSettings _settings;
-        private readonly IModel _channel = Substitute.For<IModel>();
+        private readonly IModel _consumerChannel = Substitute.For<IModel>();
+        private bool _consumerChannelCreated;
         private AsyncEventingBasicConsumer? _consumer;
         private readonly TaskCompletionSource<AsyncEventingBasicConsumer> _consumerReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<PublishCapture> _publishReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -126,36 +128,21 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
         public TestRabbitMqConnection(RabbitMQSettings settings)
         {
             _settings = settings;
-            _channel.IsOpen.Returns(true);
-            _channel.CreateBasicProperties().Returns(Substitute.For<IBasicProperties>());
-            _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(true);
-            _channel.ExchangeDeclare(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>());
-            _channel.QueueDeclare(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>()).Returns(new QueueDeclareOk("queue", 0, 0));
-            _channel.QueueBind(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IDictionary<string, object>>());
-            _channel.BasicConsume(default!, default, default!).ReturnsForAnyArgs(ci =>
-            {
-                _consumer = ci.ArgAt<IBasicConsumer>(2) as AsyncEventingBasicConsumer;
-                if (_consumer is not null)
-                {
-                    _consumerReady.TrySetResult(_consumer);
-                }
-                return "consumer-tag";
-            });
-
-            _channel.WhenForAnyArgs(c => c.BasicPublish(default!, default!, default, default!, default))
-                .Do(ci =>
-                {
-                    var capture = new PublishCapture(
-                        ci.ArgAt<string>(0),
-                        ci.ArgAt<string>(1),
-                        ci.ArgAt<ReadOnlyMemory<byte>>(4).ToArray());
-                    _publishReady.TrySetResult(capture);
-                });
+            ConfigureConsumerChannel(_consumerChannel);
         }
 
         public Task ConnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        public IModel CreateChannel() => _channel;
+        public IModel CreateChannel()
+        {
+            if (!_consumerChannelCreated)
+            {
+                _consumerChannelCreated = true;
+                return _consumerChannel;
+            }
+
+            return CreatePublishChannel();
+        }
 
         public void Dispose()
         {
@@ -189,6 +176,48 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
         }
 
         public Task<PublishCapture> MatchResultPublished => _publishReady.Task;
+
+        private void ConfigureConsumerChannel(IModel channel)
+        {
+            channel.IsOpen.Returns(true);
+            channel.CreateBasicProperties().Returns(Substitute.For<IBasicProperties>());
+            channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(true);
+            channel.ExchangeDeclare(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>());
+            channel.QueueDeclare(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>()).Returns(new QueueDeclareOk("queue", 0, 0));
+            channel.QueueBind(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IDictionary<string, object>>());
+            channel.BasicConsume(default!, default, default!).ReturnsForAnyArgs(ci =>
+            {
+                _consumer = ci.ArgAt<IBasicConsumer>(2) as AsyncEventingBasicConsumer;
+                if (_consumer is not null)
+                {
+                    _consumerReady.TrySetResult(_consumer);
+                }
+                return "consumer-tag";
+            });
+        }
+
+        private IModel CreatePublishChannel()
+        {
+            var publishChannel = Substitute.For<IModel>();
+            publishChannel.IsOpen.Returns(true);
+            publishChannel.CreateBasicProperties().Returns(Substitute.For<IBasicProperties>());
+            publishChannel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(true);
+            publishChannel.ExchangeDeclare(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>());
+            publishChannel.QueueDeclare(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<IDictionary<string, object>>()).Returns(new QueueDeclareOk("queue", 0, 0));
+            publishChannel.QueueBind(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IDictionary<string, object>>());
+
+            publishChannel.WhenForAnyArgs(c => c.BasicPublish(default!, default!, default, default!, default))
+                .Do(ci =>
+                {
+                    var capture = new PublishCapture(
+                        ci.ArgAt<string>(0),
+                        ci.ArgAt<string>(1),
+                        ci.ArgAt<ReadOnlyMemory<byte>>(4).ToArray());
+                    _publishReady.TrySetResult(capture);
+                });
+
+            return publishChannel;
+        }
     }
 
     private sealed class TestHostApplicationLifetime : IHostApplicationLifetime

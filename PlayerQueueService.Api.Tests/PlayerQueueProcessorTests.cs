@@ -1,15 +1,17 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using NUnit.Framework;
 using PlayerQueueService.Api.Messaging.Publishing;
 using PlayerQueueService.Api.Models.Events;
 using PlayerQueueService.Api.Models.Matchmaking;
 using PlayerQueueService.Api.Services;
+using Shouldly;
 
 namespace PlayerQueueService.Api.Tests;
 
 public class PlayerQueueProcessorTests
 {
-    [Fact]
+    [Test]
     public async Task ProcessAsync_CompletesWhenNotCancelled()
     {
         var matchmaker = Substitute.For<IMatchmaker>();
@@ -30,7 +32,7 @@ public class PlayerQueueProcessorTests
         await matchmaker.Received(1).EnqueueAsync(playerEvent, Arg.Any<CancellationToken>());
     }
 
-    [Fact]
+    [Test]
     public async Task ProcessAsync_ThrowsWhenCancellationRequested()
     {
         var matchmaker = Substitute.For<IMatchmaker>();
@@ -39,11 +41,11 @@ public class PlayerQueueProcessorTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
+        await Should.ThrowAsync<OperationCanceledException>(
             () => processor.ProcessAsync(new PlayerEnqueuedEvent(), cts.Token));
     }
 
-    [Fact]
+    [Test]
     public async Task ProcessAsync_LogsWhenMatchIsFormed()
     {
         var matchmaker = Substitute.For<IMatchmaker>();
