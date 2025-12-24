@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Messaging.Consumers;
+using PlayerQueueService.Api.Messaging.Publishing;
 using PlayerQueueService.Api.Models.Configuration;
 using PlayerQueueService.Api.Models.Events;
 using PlayerQueueService.Api.Models.Matchmaking;
