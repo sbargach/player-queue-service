@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.10] - 2025-12-25
+### Added
+- In-memory idempotency store keyed by message ids with a configurable retention window to skip duplicate RabbitMQ deliveries while preserving at-least-once processing.
+- Player queue consumer now short-circuits duplicate messages before processing and records message ids on publish for deduplication.
+
 ## [0.0.9] - 2025-12-22
 - Added live/ready health probes via ASP.NET Core endpoints.
 - Added an end-to-end consume → match → publish integration test with stubbed RabbitMQ.

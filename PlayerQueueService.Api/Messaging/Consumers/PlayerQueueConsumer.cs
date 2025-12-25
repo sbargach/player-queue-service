@@ -23,6 +23,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
     private readonly ILogger<PlayerQueueConsumer> _logger;
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly IMetricsProvider _metrics;
+    private readonly IIdempotencyStore _idempotencyStore;
     private CancellationToken _stoppingToken;
     private IModel? _channel;
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -34,7 +35,8 @@ public sealed class PlayerQueueConsumer : BackgroundService
         IOptions<RabbitMQSettings> options,
         IHostApplicationLifetime applicationLifetime,
         ILogger<PlayerQueueConsumer> logger,
-        IMetricsProvider metrics)
+        IMetricsProvider metrics,
+        IIdempotencyStore idempotencyStore)
     {
         _connection = connection;
         _processor = processor;
@@ -42,6 +44,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
         _settings = options.Value;
         _applicationLifetime = applicationLifetime;
         _metrics = metrics;
+        _idempotencyStore = idempotencyStore;
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -103,6 +106,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
         activity?.SetTag("player.deliveryTag", args.DeliveryTag);
 
         var stopwatch = Stopwatch.StartNew();
+        var inFlightIncremented = false;
         try
         {
             var message = JsonSerializer.Deserialize<PlayerEnqueuedEvent>(args.Body.Span, SerializerOptions);
@@ -123,9 +127,31 @@ public sealed class PlayerQueueConsumer : BackgroundService
             activity?.SetTag("player.region", message.Region);
             activity?.SetTag("player.mode", message.GameMode);
 
+            await using var idempotencyLease = await _idempotencyStore
+                .AcquireAsync(message.MessageId, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!idempotencyLease.ShouldProcess)
+            {
+                _logger.LogInformation(
+                    "Skipping duplicate message {MessageId} for player {PlayerId} ({Region}/{Mode})",
+                    message.MessageId,
+                    message.PlayerId,
+                    message.Region,
+                    message.GameMode);
+                channel.BasicAck(args.DeliveryTag, multiple: false);
+                stopwatch.Stop();
+                _metrics.IncrementConsumeSuccess(message, _settings.QueueName);
+                _metrics.RecordConsumeDuration(message, stopwatch.Elapsed.TotalMilliseconds, _settings.QueueName);
+                activity?.SetStatus(ActivityStatusCode.Ok, "duplicate");
+                return;
+            }
+
             _metrics.IncrementInFlight(_settings.QueueName);
+            inFlightIncremented = true;
             await TryProcessWithRetryAsync(message, activity, cancellationToken).ConfigureAwait(false);
 
+            await idempotencyLease.MarkProcessedAsync().ConfigureAwait(false);
             channel.BasicAck(args.DeliveryTag, multiple: false);
             stopwatch.Stop();
             _metrics.IncrementProcessed(message, _settings.QueueName);
@@ -160,7 +186,10 @@ public sealed class PlayerQueueConsumer : BackgroundService
             {
                 stopwatch.Stop();
             }
-            _metrics.DecrementInFlight(_settings.QueueName);
+            if (inFlightIncremented)
+            {
+                _metrics.DecrementInFlight(_settings.QueueName);
+            }
         }
     }
 

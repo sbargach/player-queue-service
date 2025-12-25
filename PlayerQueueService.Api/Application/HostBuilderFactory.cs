@@ -72,10 +72,12 @@ public static class HostBuilderFactory
             .Validate(options => !string.IsNullOrWhiteSpace(options.HostName), "HostName is required")
             .ValidateOnStart();
 
+        services.AddMemoryCache();
         services.AddSingleton<IRabbitMqConnection, RabbitMqConnection>();
         services.AddSingleton<IPlayerQueuePublisher, PlayerQueuePublisher>();
         services.AddSingleton<IMatchResultPublisher, MatchResultPublisher>();
         services.AddSingleton<IPlayerQueueProcessor, PlayerQueueProcessor>();
+        services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
         services.AddSingleton<IMatchmaker, Matchmaker>();
         services.AddSingleton<IMetricsProvider, MetricsProvider>();
         services.AddHealthChecks()

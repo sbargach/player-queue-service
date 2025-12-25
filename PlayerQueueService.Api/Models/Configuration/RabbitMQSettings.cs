@@ -95,6 +95,12 @@ public sealed record RabbitMQSettings
     public int RetryDelaySeconds { get; init; } = 2;
 
     /// <summary>
+    /// Time window in minutes to remember processed message ids to enforce idempotency.
+    /// </summary>
+    [Range(1, 1440)]
+    public int IdempotencyRetentionMinutes { get; init; } = 60;
+
+    /// <summary>
     /// Confirmation timeout in seconds when publishing messages.
     /// </summary>
     [Range(1, 60)]
