@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NSubstitute;
 using NUnit.Framework;
 using PlayerQueueService.Api.Messaging.Configuration;
@@ -22,7 +23,23 @@ public class RabbitMqTopologyTests
         RabbitMqTopology.EnsureQueue(model, settings);
 
         model.Received(1).ExchangeDeclare(settings.ExchangeName, ExchangeType.Topic, true, false);
-        model.Received(1).QueueDeclare(settings.QueueName, true, false, false);
+        model.Received(1).ExchangeDeclare(settings.DeadLetterExchangeName, ExchangeType.Topic, true, false);
+        model.Received(1).QueueDeclare(
+            settings.DeadLetterQueueName,
+            true,
+            false,
+            false);
+        model.Received(1).QueueBind(settings.DeadLetterQueueName, settings.DeadLetterExchangeName, settings.DeadLetterRoutingKey);
+        model.Received(1).QueueDeclare(
+            settings.QueueName,
+            true,
+            false,
+            false,
+            Arg.Is<IDictionary<string, object>>(dict =>
+                dict.ContainsKey("x-dead-letter-exchange") &&
+                dict.ContainsKey("x-dead-letter-routing-key") &&
+                string.Equals(dict["x-dead-letter-exchange"] == null ? null : dict["x-dead-letter-exchange"].ToString(), settings.DeadLetterExchangeName, StringComparison.Ordinal) &&
+                string.Equals(dict["x-dead-letter-routing-key"] == null ? null : dict["x-dead-letter-routing-key"].ToString(), settings.DeadLetterRoutingKey, StringComparison.Ordinal)));
         model.Received(1).QueueBind(settings.QueueName, settings.ExchangeName, settings.RoutingKey);
     }
 

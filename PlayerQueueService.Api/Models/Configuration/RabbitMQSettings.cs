@@ -47,6 +47,24 @@ public sealed record RabbitMQSettings
     public string ExchangeName { get; init; } = "player-queue";
 
     /// <summary>
+    /// Name of the dead-letter exchange used when messages are rejected.
+    /// </summary>
+    [Required]
+    public string DeadLetterExchangeName { get; init; } = "player-queue.dlx";
+
+    /// <summary>
+    /// Name of the dead-letter queue that stores rejected messages.
+    /// </summary>
+    [Required]
+    public string DeadLetterQueueName { get; init; } = "player-queue.dead-letter";
+
+    /// <summary>
+    /// Routing key used when messages are dead-lettered.
+    /// </summary>
+    [Required]
+    public string DeadLetterRoutingKey { get; init; } = "player.queue.dead-letter";
+
+    /// <summary>
     /// Routing key used when publishing player events.
     /// </summary>
     [Required]

@@ -24,6 +24,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly IMetricsProvider _metrics;
     private readonly IIdempotencyStore _idempotencyStore;
+    private readonly IPlayerEnqueuedEventValidator _validator;
     private CancellationToken _stoppingToken;
     private IModel? _channel;
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -36,7 +37,8 @@ public sealed class PlayerQueueConsumer : BackgroundService
         IHostApplicationLifetime applicationLifetime,
         ILogger<PlayerQueueConsumer> logger,
         IMetricsProvider metrics,
-        IIdempotencyStore idempotencyStore)
+        IIdempotencyStore idempotencyStore,
+        IPlayerEnqueuedEventValidator validator)
     {
         _connection = connection;
         _processor = processor;
@@ -45,6 +47,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
         _applicationLifetime = applicationLifetime;
         _metrics = metrics;
         _idempotencyStore = idempotencyStore;
+        _validator = validator;
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -113,19 +116,42 @@ public sealed class PlayerQueueConsumer : BackgroundService
 
             if (message is null)
             {
-                _logger.LogCritical("Received empty player event message; stopping application to preserve delivery");
-                _applicationLifetime.StopApplication();
+                _logger.LogError("Received empty player event message; sending to dead-letter queue");
                 activity?.SetStatus(ActivityStatusCode.Error, "deserialization_failed");
-                _metrics.IncrementConsumeFailure(
-                    new PlayerEnqueuedEvent { GameMode = "unknown", Region = "unknown" },
-                    "deserialization_failed",
-                    _settings.QueueName);
-                throw new InvalidOperationException("Empty player event payload.");
+                stopwatch.Stop();
+                var poison = new PlayerEnqueuedEvent { GameMode = "unknown", Region = "unknown" };
+                _metrics.IncrementValidationFailure(poison, "consume", "deserialization_failed", _settings.QueueName);
+                _metrics.IncrementDeadLetter(poison, "deserialization_failed", _settings.QueueName);
+                _metrics.IncrementConsumeFailure(poison, "deserialization_failed", _settings.QueueName);
+                _metrics.RecordConsumeDuration(poison, stopwatch.Elapsed.TotalMilliseconds, _settings.QueueName);
+                channel.BasicNack(args.DeliveryTag, multiple: false, requeue: false);
+                return;
             }
 
             activity?.SetTag("player.id", message.PlayerId);
             activity?.SetTag("player.region", message.Region);
             activity?.SetTag("player.mode", message.GameMode);
+
+            var validation = _validator.Validate(message);
+            if (!validation.IsValid)
+            {
+                var errorMessage = string.Join("; ", validation.Errors);
+                _logger.LogWarning(
+                    "Validation failed for message {MessageId} ({PlayerId} {Region}/{Mode}): {Errors}",
+                    message.MessageId,
+                    message.PlayerId,
+                    message.Region,
+                    message.GameMode,
+                    errorMessage);
+                activity?.SetStatus(ActivityStatusCode.Error, "validation_failed");
+                stopwatch.Stop();
+                _metrics.IncrementValidationFailure(message, "consume", errorMessage, _settings.QueueName);
+                _metrics.IncrementDeadLetter(message, "validation_failed", _settings.QueueName);
+                _metrics.IncrementConsumeFailure(message, "validation_failed", _settings.QueueName);
+                _metrics.RecordConsumeDuration(message, stopwatch.Elapsed.TotalMilliseconds, _settings.QueueName);
+                channel.BasicNack(args.DeliveryTag, multiple: false, requeue: false);
+                return;
+            }
 
             await using var idempotencyLease = await _idempotencyStore
                 .AcquireAsync(message.MessageId, cancellationToken)
@@ -149,7 +175,19 @@ public sealed class PlayerQueueConsumer : BackgroundService
 
             _metrics.IncrementInFlight(_settings.QueueName);
             inFlightIncremented = true;
-            await TryProcessWithRetryAsync(message, activity, cancellationToken).ConfigureAwait(false);
+            var outcome = await TryProcessWithRetryAsync(message, activity, cancellationToken).ConfigureAwait(false);
+
+            if (!outcome.Succeeded)
+            {
+                channel.BasicNack(args.DeliveryTag, multiple: false, requeue: false);
+                stopwatch.Stop();
+                var reason = outcome.FailureReason ?? "processing_failed";
+                _metrics.IncrementDeadLetter(message, reason, _settings.QueueName);
+                _metrics.IncrementConsumeFailure(message, reason, _settings.QueueName);
+                _metrics.RecordConsumeDuration(message, stopwatch.Elapsed.TotalMilliseconds, _settings.QueueName);
+                activity?.SetStatus(ActivityStatusCode.Error, reason);
+                return;
+            }
 
             await idempotencyLease.MarkProcessedAsync().ConfigureAwait(false);
             channel.BasicAck(args.DeliveryTag, multiple: false);
@@ -224,7 +262,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
             propagationContext.ActivityContext);
     }
 
-    private async Task TryProcessWithRetryAsync(
+    private async Task<ProcessingOutcome> TryProcessWithRetryAsync(
         PlayerEnqueuedEvent message,
         Activity? activity,
         CancellationToken cancellationToken)
@@ -239,7 +277,7 @@ public sealed class PlayerQueueConsumer : BackgroundService
             try
             {
                 await _processor.ProcessAsync(message, cancellationToken).ConfigureAwait(false);
-                return;
+                return ProcessingOutcome.Success();
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -266,19 +304,23 @@ public sealed class PlayerQueueConsumer : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogCritical(
+                _logger.LogError(
                     ex,
-                    "Processing failed for player {PlayerId} after {Attempts} attempts; stopping application to preserve message",
+                    "Processing failed for player {PlayerId} after {Attempts} attempts; sending to dead-letter queue",
                     message.PlayerId,
                     attempt);
-                _metrics.IncrementConsumeFailure(message, ex.GetType().Name, _settings.QueueName);
                 activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-                _applicationLifetime.StopApplication();
-                throw;
+                return ProcessingOutcome.Failure(ex.GetType().Name);
             }
         }
 
         throw new OperationCanceledException(cancellationToken);
+    }
+
+    private sealed record ProcessingOutcome(bool Succeeded, string? FailureReason)
+    {
+        public static ProcessingOutcome Success() => new(true, null);
+        public static ProcessingOutcome Failure(string? reason) => new(false, reason);
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)

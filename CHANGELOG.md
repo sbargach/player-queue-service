@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Released]
 
+## [1.0.0] - 2025-12-26
+### Added
+- Dead-letter exchange/queue wiring and consumer dead-lettering for poisoned or max-retry messages.
+- Event contract validation on publish/consume with metrics for validation failures.
+
 ## [Unreleased]
 
 ## [0.0.10] - 2025-12-25

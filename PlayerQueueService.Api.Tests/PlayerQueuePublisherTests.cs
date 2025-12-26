@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -7,6 +8,7 @@ using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Messaging.Publishing;
 using PlayerQueueService.Api.Models.Configuration;
 using PlayerQueueService.Api.Models.Events;
+using PlayerQueueService.Api.Services;
 using PlayerQueueService.Api.Telemetry;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -21,6 +23,7 @@ public class PlayerQueuePublisherTests
     private IBasicProperties _properties = null!;
     private RabbitMQSettings _settings = null!;
     private IMetricsProvider _metrics = null!;
+    private IPlayerEnqueuedEventValidator _validator = null!;
 
     [SetUp]
     public void SetUp()
@@ -29,6 +32,8 @@ public class PlayerQueuePublisherTests
         _channel = Substitute.For<IModel>();
         _properties = Substitute.For<IBasicProperties>();
         _metrics = Substitute.For<IMetricsProvider>();
+        _validator = Substitute.For<IPlayerEnqueuedEventValidator>();
+        _validator.Validate(Arg.Any<PlayerEnqueuedEvent>()).Returns(ValidationOutcome.Success());
         _settings = new RabbitMQSettings
         {
             ExchangeName = "player-queue",
@@ -52,12 +57,13 @@ public class PlayerQueuePublisherTests
             _connection,
             Options.Create(_settings),
             NullLogger<PlayerQueuePublisher>.Instance,
-            _metrics);
+            _metrics,
+            _validator);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
         await Should.ThrowAsync<OperationCanceledException>(
-            () => publisher.PublishAsync(new PlayerEnqueuedEvent(), cts.Token));
+            () => publisher.PublishAsync(ValidEvent(), cts.Token));
 
         _channel.Received().ConfirmSelect();
     }
@@ -71,9 +77,10 @@ public class PlayerQueuePublisherTests
             _connection,
             Options.Create(_settings),
             NullLogger<PlayerQueuePublisher>.Instance,
-            _metrics);
+            _metrics,
+            _validator);
 
-        await Should.ThrowAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(new PlayerEnqueuedEvent()));
+        await Should.ThrowAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(ValidEvent()));
 
         _channel.Received(1).BasicPublish(
             _settings.ExchangeName,
@@ -92,9 +99,10 @@ public class PlayerQueuePublisherTests
             _connection,
             Options.Create(_settings),
             NullLogger<PlayerQueuePublisher>.Instance,
-            _metrics);
+            _metrics,
+            _validator);
 
-        await Should.ThrowAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(new PlayerEnqueuedEvent()));
+        await Should.ThrowAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(ValidEvent()));
 
         _connection.Received(1).CreateChannel();
     }
@@ -107,7 +115,8 @@ public class PlayerQueuePublisherTests
             _connection,
             Options.Create(_settings),
             NullLogger<PlayerQueuePublisher>.Instance,
-            _metrics);
+            _metrics,
+            _validator);
 
         await publisher.PublishAsync(playerEvent);
 
@@ -127,13 +136,41 @@ public class PlayerQueuePublisherTests
             _connection,
             Options.Create(_settings),
             NullLogger<PlayerQueuePublisher>.Instance,
-            _metrics);
+            _metrics,
+            _validator);
 
         await Should.ThrowAsync<BrokerReturnedMessageException>(() => publisher.PublishAsync(playerEvent));
 
         _metrics.Received(1).IncrementPublishAttempt(playerEvent);
         _metrics.Received(1).IncrementPublishFailure(playerEvent, nameof(BrokerReturnedMessageException));
     }
+
+    [Test]
+    public async Task PublishAsync_ThrowsWhenValidationFails()
+    {
+        var playerEvent = ValidEvent();
+        _validator.Validate(playerEvent).Returns(ValidationOutcome.Failure(new[] { "Region is required." }));
+
+        var publisher = new PlayerQueuePublisher(
+            _connection,
+            Options.Create(_settings),
+            NullLogger<PlayerQueuePublisher>.Instance,
+            _metrics,
+            _validator);
+
+        await Should.ThrowAsync<ValidationException>(() => publisher.PublishAsync(playerEvent));
+
+        _metrics.Received(1).IncrementValidationFailure(playerEvent, "publish", Arg.Any<string>(), _settings.QueueName);
+        _metrics.DidNotReceive().IncrementPublishAttempt(Arg.Any<PlayerEnqueuedEvent>());
+    }
+
+    private static PlayerEnqueuedEvent ValidEvent() => new()
+    {
+        PlayerId = Guid.NewGuid(),
+        Region = "eu",
+        GameMode = "trios",
+        SkillRating = 1200
+    };
 
     private Func<CallInfo, bool> InvokeBasicReturn()
     {

@@ -15,6 +15,9 @@ public class RabbitMQSettingsTests
             HostName = string.Empty,
             QueueName = string.Empty,
             ExchangeName = string.Empty,
+            DeadLetterExchangeName = string.Empty,
+            DeadLetterQueueName = string.Empty,
+            DeadLetterRoutingKey = string.Empty,
             RoutingKey = string.Empty,
             MatchResultsExchangeName = string.Empty,
             MatchResultsQueueName = string.Empty,
@@ -28,6 +31,9 @@ public class RabbitMQSettingsTests
         results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.HostName)));
         results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.QueueName)));
         results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.ExchangeName)));
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.DeadLetterExchangeName)));
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.DeadLetterQueueName)));
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.DeadLetterRoutingKey)));
         results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.RoutingKey)));
         results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsExchangeName)));
         results.ShouldContain(r => r.MemberNames.Contains(nameof(RabbitMQSettings.MatchResultsQueueName)));

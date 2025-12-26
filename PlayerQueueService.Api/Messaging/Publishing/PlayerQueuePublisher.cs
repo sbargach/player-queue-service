@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -6,6 +7,7 @@ using PlayerQueueService.Api.Messaging.Configuration;
 using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Models.Configuration;
 using PlayerQueueService.Api.Models.Events;
+using PlayerQueueService.Api.Services;
 using PlayerQueueService.Api.Telemetry;
 using Polly;
 using OpenTelemetry.Context.Propagation;
@@ -21,23 +23,33 @@ public sealed class PlayerQueuePublisher : IPlayerQueuePublisher
     private readonly RabbitMQSettings _settings;
     private readonly ILogger<PlayerQueuePublisher> _logger;
     private readonly IMetricsProvider _metrics;
+    private readonly IPlayerEnqueuedEventValidator _validator;
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
     public PlayerQueuePublisher(
         IRabbitMqConnection connection,
         IOptions<RabbitMQSettings> settings,
         ILogger<PlayerQueuePublisher> logger,
-        IMetricsProvider metrics)
+        IMetricsProvider metrics,
+        IPlayerEnqueuedEventValidator validator)
     {
         _connection = connection;
         _settings = settings.Value;
         _logger = logger;
         _metrics = metrics;
+        _validator = validator;
     }
 
     public async Task PublishAsync(PlayerEnqueuedEvent playerEvent, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var validation = _validator.Validate(playerEvent);
+        if (!validation.IsValid)
+        {
+            var errorMessage = string.Join("; ", validation.Errors);
+            _metrics.IncrementValidationFailure(playerEvent, "publish", errorMessage, _settings.QueueName);
+            throw new ValidationException($"PlayerEnqueuedEvent failed validation: {errorMessage}");
+        }
 
         using var activity = Tracing.ActivitySource.StartActivity(
             "rabbitmq.publish",

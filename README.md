@@ -33,6 +33,11 @@ RabbitMQ options live under the `RabbitMQ` section in `appsettings*.json`:
 
 All required fields are validated on host startup, and the worker stops if message processing or channel stability is compromised to preserve delivery.
 
+### Reliability
+
+- Event contracts are validated on publish and consume; invalid messages are rejected before hitting business logic.
+- Poison or max-retry messages are `BasicNack`ed with `requeue=false` and routed to the configured dead-letter exchange/queue (`player-queue.dlx` / `player-queue.dead-letter` by default).
+
 ### Matchmaking
 
 The consumer uses a lightweight in-memory matcher to group players by region/mode. Defaults live under `Matchmaking` in `appsettings*.json`:

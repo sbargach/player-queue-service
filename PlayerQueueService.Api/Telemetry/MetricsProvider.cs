@@ -20,6 +20,8 @@ public sealed class MetricsProvider : IMetricsProvider
     private readonly Counter<long> _processingRetries;
     private readonly Counter<long> _processedEntries;
     private readonly Counter<long> _matchesFormed;
+    private readonly Counter<long> _validationFailures;
+    private readonly Counter<long> _deadLetters;
     private readonly Histogram<double> _publishDuration;
     private readonly Histogram<double> _processingDuration;
     private readonly Histogram<double> _queueWait;
@@ -41,6 +43,8 @@ public sealed class MetricsProvider : IMetricsProvider
         _processingRetries = _meter.CreateCounter<long>("playerqueue.consume.retries", description: "Processing retries triggered by failures.");
         _processedEntries = _meter.CreateCounter<long>("playerqueue.processed.entries", description: "Entries processed from the queue.");
         _matchesFormed = _meter.CreateCounter<long>("playerqueue.match.formed", description: "Matches successfully formed.");
+        _validationFailures = _meter.CreateCounter<long>("playerqueue.validation.failures", description: "Contract validation failures.");
+        _deadLetters = _meter.CreateCounter<long>("playerqueue.dlq.published", description: "Messages sent to the dead-letter queue.");
         _publishDuration = _meter.CreateHistogram<double>("playerqueue.publish.duration.ms", unit: "ms", description: "Duration of publish operations.");
         _processingDuration = _meter.CreateHistogram<double>("playerqueue.consume.duration.ms", unit: "ms", description: "Duration of consume operations.");
         _queueWait = _meter.CreateHistogram<double>("playerqueue.queue.wait.ms", unit: "ms", description: "Time players waited before matchmaking.");
@@ -77,6 +81,12 @@ public sealed class MetricsProvider : IMetricsProvider
     public void RecordConsumeDuration(PlayerEnqueuedEvent playerEvent, double milliseconds, string queueName) =>
         _processingDuration.Record(milliseconds, BuildTags(playerEvent, queueName));
 
+    public void IncrementValidationFailure(PlayerEnqueuedEvent playerEvent, string scope, string reason, string queueName = "") =>
+        _validationFailures.Add(1, BuildValidationTags(playerEvent, scope, reason, queueName));
+
+    public void IncrementDeadLetter(PlayerEnqueuedEvent playerEvent, string reason, string queueName) =>
+        _deadLetters.Add(1, BuildFailureTags(playerEvent, reason, queueName));
+
     public void IncrementInFlight(string queueName) =>
         _inFlightProcessing.Add(1, new KeyValuePair<string, object?>("queue", queueName));
 
@@ -108,6 +118,12 @@ public sealed class MetricsProvider : IMetricsProvider
 
     private static KeyValuePair<string, object?>[] BuildFailureTags(PlayerEnqueuedEvent playerEvent, string reason, string queueName = "") =>
         BuildTags(playerEvent, queueName)
+            .Append(new KeyValuePair<string, object?>("reason", reason))
+            .ToArray();
+
+    private static KeyValuePair<string, object?>[] BuildValidationTags(PlayerEnqueuedEvent playerEvent, string scope, string reason, string queueName = "") =>
+        BuildTags(playerEvent, queueName)
+            .Append(new KeyValuePair<string, object?>("scope", scope))
             .Append(new KeyValuePair<string, object?>("reason", reason))
             .ToArray();
 

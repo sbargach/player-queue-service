@@ -36,6 +36,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
     private TestRabbitMqConnection? _connection;
     private readonly IMetricsProvider _metrics = Substitute.For<IMetricsProvider>();
     private readonly CapturingMatchResultPublisher _publisher = new();
+    private readonly IPlayerEnqueuedEventValidator _validator = new PlayerEnqueuedEventValidator();
     private IMemoryCache? _memoryCache;
     private InMemoryIdempotencyStore? _idempotencyStore;
     private TestHostApplicationLifetime? _lifetime;
@@ -127,7 +128,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ProcessingFailsAfterMaxRetries_StopsApplicationWithoutAck()
+    public async Task ProcessingFailsAfterMaxRetries_DeadLettersWithoutStopping()
     {
         var processor = new AlwaysFailProcessor();
         var settings = _settings with { MaxRetryAttempts = 2, RetryDelaySeconds = 1 };
@@ -142,13 +143,15 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
             RequestedAt = DateTimeOffset.UtcNow
         };
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _connection!.DeliverAsync(playerEvent));
+        await _connection!.DeliverAsync(playerEvent);
 
-        Assert.True(_lifetime!.ApplicationStopping.IsCancellationRequested);
+        Assert.False(_lifetime!.ApplicationStopping.IsCancellationRequested);
         Assert.NotNull(_connection);
         Assert.Equal(0, _connection.AckCount);
-        Assert.Equal(0, _connection.NackCount);
+        Assert.Equal(1, _connection.NackCount);
+        Assert.False(_connection.LastNackRequeue);
         Assert.Equal(2, processor.ProcessCount);
+        Assert.Single(_connection.DeadLetteredMessages);
     }
 
     [Fact]
@@ -229,6 +232,29 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
         Assert.Equal(1, processor.ProcessCount);
         Assert.Equal(3, _connection.AckCount);
         Assert.Equal(0, _connection.NackCount);
+    }
+
+    [Fact]
+    public async Task InvalidMessages_AreDeadLetteredWithoutStopping()
+    {
+        await StartConsumerAsync();
+
+        var playerEvent = new PlayerEnqueuedEvent
+        {
+            PlayerId = Guid.NewGuid(),
+            Region = "",
+            GameMode = "duos",
+            SkillRating = 1500,
+            RequestedAt = DateTimeOffset.UtcNow
+        };
+
+        await _connection!.DeliverAsync(playerEvent);
+
+        Assert.False(_lifetime!.ApplicationStopping.IsCancellationRequested);
+        Assert.Equal(0, _connection.AckCount);
+        Assert.Equal(1, _connection.NackCount);
+        Assert.False(_connection.LastNackRequeue);
+        Assert.Contains(_connection.DeadLetteredMessages, evt => evt.MessageId == playerEvent.MessageId);
     }
 
     [Fact]
@@ -320,7 +346,8 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
             _lifetime,
             NullLogger<PlayerQueueConsumer>.Instance,
             _metrics,
-            _idempotencyStore);
+            _idempotencyStore,
+            _validator);
 
         await _consumer.StartAsync(startToken);
         await _connection.WaitForConsumerAsync(TimeSpan.FromSeconds(5));
@@ -332,6 +359,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
         private readonly IModel _channel = Substitute.For<IModel>();
         private AsyncEventingBasicConsumer? _consumer;
         private readonly TaskCompletionSource<AsyncEventingBasicConsumer> _consumerReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly Dictionary<ulong, PlayerEnqueuedEvent> _inFlight = new();
 
         public TestRabbitMqConnection(RabbitMQSettings settings)
         {
@@ -344,6 +372,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
         public ulong LastAckDeliveryTag { get; private set; }
         public ulong LastNackDeliveryTag { get; private set; }
         public bool LastNackRequeue { get; private set; }
+        public List<PlayerEnqueuedEvent> DeadLetteredMessages { get; } = new();
 
         public Task ConnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -371,10 +400,12 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
             var headerMap = headers ?? new Dictionary<string, object?>();
             props.Headers.Returns(headerMap);
             props.MessageId.Returns(playerEvent.MessageId);
+            var deliveryTag = (ulong)Random.Shared.Next(1, int.MaxValue);
+            _inFlight[deliveryTag] = playerEvent;
 
             await _consumer!.HandleBasicDeliver(
                 consumerTag: "consumer-tag",
-                deliveryTag: (ulong)Random.Shared.Next(1, int.MaxValue),
+                deliveryTag: deliveryTag,
                 redelivered: false,
                 exchange: _settings.ExchangeName,
                 routingKey: _settings.RoutingKey,
@@ -413,6 +444,7 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
                 {
                     AckCount++;
                     LastAckDeliveryTag = ci.ArgAt<ulong>(0);
+                    _inFlight.Remove(LastAckDeliveryTag);
                 });
             channel.When(c => c.BasicNack(Arg.Any<ulong>(), Arg.Any<bool>(), Arg.Any<bool>()))
                 .Do(ci =>
@@ -420,6 +452,11 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
                     NackCount++;
                     LastNackDeliveryTag = ci.ArgAt<ulong>(0);
                     LastNackRequeue = ci.ArgAt<bool>(2);
+                    if (!LastNackRequeue && _inFlight.TryGetValue(LastNackDeliveryTag, out var payload))
+                    {
+                        DeadLetteredMessages.Add(payload);
+                    }
+                    _inFlight.Remove(LastNackDeliveryTag);
                 });
         }
     }

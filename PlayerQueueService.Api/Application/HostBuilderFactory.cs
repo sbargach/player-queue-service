@@ -69,6 +69,9 @@ public static class HostBuilderFactory
             .Validate(options => !string.IsNullOrWhiteSpace(options.QueueName), "QueueName is required")
             .Validate(options => !string.IsNullOrWhiteSpace(options.ExchangeName), "ExchangeName is required")
             .Validate(options => !string.IsNullOrWhiteSpace(options.RoutingKey), "RoutingKey is required")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.DeadLetterExchangeName), "DeadLetterExchangeName is required")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.DeadLetterQueueName), "DeadLetterQueueName is required")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.DeadLetterRoutingKey), "DeadLetterRoutingKey is required")
             .Validate(options => !string.IsNullOrWhiteSpace(options.HostName), "HostName is required")
             .ValidateOnStart();
 
@@ -79,6 +82,7 @@ public static class HostBuilderFactory
         services.AddSingleton<IPlayerQueueProcessor, PlayerQueueProcessor>();
         services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
         services.AddSingleton<IMatchmaker, Matchmaker>();
+        services.AddSingleton<IPlayerEnqueuedEventValidator, PlayerEnqueuedEventValidator>();
         services.AddSingleton<IMetricsProvider, MetricsProvider>();
         services.AddHealthChecks()
             .AddCheck<RabbitMqPublisherHealthCheck>("rabbitmq_publisher")

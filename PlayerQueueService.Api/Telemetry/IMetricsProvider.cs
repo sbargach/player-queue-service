@@ -14,6 +14,8 @@ public interface IMetricsProvider : IDisposable
     void IncrementConsumeSuccess(PlayerEnqueuedEvent playerEvent, string queueName);
     void IncrementConsumeFailure(PlayerEnqueuedEvent playerEvent, string reason, string queueName);
     void RecordConsumeDuration(PlayerEnqueuedEvent playerEvent, double milliseconds, string queueName);
+    void IncrementValidationFailure(PlayerEnqueuedEvent playerEvent, string scope, string reason, string queueName = "");
+    void IncrementDeadLetter(PlayerEnqueuedEvent playerEvent, string reason, string queueName);
     void IncrementInFlight(string queueName);
     void DecrementInFlight(string queueName);
     void IncrementMatchFormed(Models.Matchmaking.MatchResult match);
