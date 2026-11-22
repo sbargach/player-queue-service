@@ -34,6 +34,7 @@ public class MatchmakerTests
 
         result.ShouldNotBeNull();
         result!.Players.Count.ShouldBe(2);
+        matchmaker.ConfirmPublished(result);
         _metrics.Received().IncrementMatchFormed(result);
         _metrics.Received().RecordQueueWait(result);
     }
@@ -55,6 +56,24 @@ public class MatchmakerTests
     }
 
     [Test]
+    public async Task EnqueueAsync_KeepsRegionAndModeBucketsSeparate()
+    {
+        var matchmaker = CreateMatchmaker();
+        var first = BuildPlayer(1100) with { Region = "EU:ranked", GameMode = "duos" };
+        var otherMode = BuildPlayer(1110) with { Region = "eu", GameMode = "ranked:duos" };
+        var teammate = BuildPlayer(1120) with { Region = "eu:ranked", GameMode = "duos" };
+
+        (await matchmaker.EnqueueAsync(first)).ShouldBeNull();
+        (await matchmaker.EnqueueAsync(otherMode)).ShouldBeNull();
+
+        var match = await matchmaker.EnqueueAsync(teammate);
+
+        match.ShouldNotBeNull();
+        match!.Players.Select(player => player.MessageId)
+            .ShouldBe(new[] { first.MessageId, teammate.MessageId }, ignoreOrder: true);
+    }
+
+    [Test]
     public async Task EnqueueAsync_DropsExpiredPlayersBeforeMatching()
     {
         var matchmaker = CreateMatchmaker();
@@ -68,6 +87,28 @@ public class MatchmakerTests
 
         result.ShouldNotBeNull();
         result!.Players.ShouldNotContain(stalePlayer);
+    }
+
+    [Test]
+    public async Task PublishFailure_RestoresWaitingPlayersForRetry()
+    {
+        _metrics.ClearReceivedCalls();
+        var matchmaker = CreateMatchmaker();
+        var first = BuildPlayer(1100);
+        var second = BuildPlayer(1120);
+
+        await matchmaker.EnqueueAsync(first);
+        var original = await matchmaker.EnqueueAsync(second);
+        original.ShouldNotBeNull();
+
+        matchmaker.RestoreAfterPublishFailure(original, second.MessageId);
+        var retry = await matchmaker.EnqueueAsync(second);
+
+        retry.ShouldNotBeNull();
+        retry!.MatchId.ShouldBe(original.MatchId);
+        retry.Players.Select(player => player.MessageId)
+            .ShouldBe(original.Players.Select(player => player.MessageId), ignoreOrder: true);
+        _metrics.DidNotReceive().IncrementMatchFormed(Arg.Any<Models.Matchmaking.MatchResult>());
     }
 
     private Matchmaker CreateMatchmaker() =>

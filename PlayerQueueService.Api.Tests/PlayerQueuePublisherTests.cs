@@ -51,7 +51,17 @@ public class PlayerQueuePublisherTests
     [Test]
     public async Task PublishAsync_RetriesUntilCancelled_WhenConfirmationTimesOut()
     {
-        _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(false);
+        var secondAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = 0;
+        _channel.WaitForConfirms(Arg.Any<TimeSpan>()).Returns(_ =>
+        {
+            if (Interlocked.Increment(ref attempts) == 2)
+            {
+                secondAttempt.TrySetResult();
+            }
+
+            return false;
+        });
 
         var publisher = new PlayerQueuePublisher(
             _connection,
@@ -60,12 +70,15 @@ public class PlayerQueuePublisherTests
             _metrics,
             _validator);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        using var cts = new CancellationTokenSource();
+        var publishing = publisher.PublishAsync(ValidEvent(), cts.Token);
+        await secondAttempt.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cts.Cancel();
 
         await Should.ThrowAsync<OperationCanceledException>(
-            () => publisher.PublishAsync(ValidEvent(), cts.Token));
+            () => publishing);
 
-        _channel.Received().ConfirmSelect();
+        _channel.Received(2).WaitForConfirms(Arg.Any<TimeSpan>());
     }
 
     [Test]

@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using PlayerQueueService.Api.Models.Configuration;
 using PlayerQueueService.Api.Models.Events;
@@ -12,7 +14,7 @@ public sealed class Matchmaker : IMatchmaker
     private readonly MatchmakingSettings _settings;
     private readonly IMetricsProvider _metrics;
     private readonly ILogger<Matchmaker> _logger;
-    private readonly ConcurrentDictionary<string, MatchBucket> _buckets = new();
+    private readonly ConcurrentDictionary<(string Region, string GameMode), MatchBucket> _buckets = new();
 
     public Matchmaker(
         IOptions<MatchmakingSettings> settings,
@@ -28,11 +30,32 @@ public sealed class Matchmaker : IMatchmaker
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var bucketKey = $"{playerEvent.Region}:{playerEvent.GameMode}".ToLowerInvariant();
-        var bucket = _buckets.GetOrAdd(bucketKey, _ => new MatchBucket(_settings, _metrics, _logger));
+        var bucket = GetBucket(playerEvent.Region, playerEvent.GameMode);
 
         var match = bucket.Add(playerEvent);
         return ValueTask.FromResult(match);
+    }
+
+    public void ConfirmPublished(MatchResult match)
+    {
+        _metrics.IncrementMatchFormed(match);
+        _metrics.RecordQueueWait(match);
+
+        _logger.LogInformation(
+            "Formed match with {Count} players in region {Region} for mode {Mode} (avg skill {Average})",
+            match.Players.Count,
+            match.Region,
+            match.GameMode,
+            match.AverageSkillRating);
+    }
+
+    public void RestoreAfterPublishFailure(MatchResult match, string currentMessageId) =>
+        GetBucket(match.Region, match.GameMode).Restore(match.Players, currentMessageId);
+
+    private MatchBucket GetBucket(string region, string gameMode)
+    {
+        var key = (region.ToLowerInvariant(), gameMode.ToLowerInvariant());
+        return _buckets.GetOrAdd(key, _ => new MatchBucket(_settings));
     }
 
     private sealed class MatchBucket
@@ -40,14 +63,10 @@ public sealed class Matchmaker : IMatchmaker
         private readonly List<PlayerEnqueuedEvent> _waiting = new();
         private readonly object _syncRoot = new();
         private readonly MatchmakingSettings _settings;
-        private readonly IMetricsProvider _metrics;
-        private readonly ILogger _logger;
 
-        public MatchBucket(MatchmakingSettings settings, IMetricsProvider metrics, ILogger logger)
+        public MatchBucket(MatchmakingSettings settings)
         {
             _settings = settings;
-            _metrics = metrics;
-            _logger = logger;
         }
 
         public MatchResult? Add(PlayerEnqueuedEvent playerEvent)
@@ -56,7 +75,10 @@ public sealed class Matchmaker : IMatchmaker
             {
                 PruneExpired();
 
-                _waiting.Add(playerEvent);
+                if (_waiting.All(player => player.MessageId != playerEvent.MessageId))
+                {
+                    _waiting.Add(playerEvent);
+                }
                 if (_waiting.Count < _settings.TeamSize)
                 {
                     return null;
@@ -73,17 +95,22 @@ public sealed class Matchmaker : IMatchmaker
                     _waiting.Remove(matchedPlayer);
                 }
 
-                _metrics.IncrementMatchFormed(match);
-                _metrics.RecordQueueWait(match);
-
-                _logger.LogInformation(
-                    "Formed match with {Count} players in region {Region} for mode {Mode} (avg skill {Average})",
-                    match.Players.Count,
-                    match.Region,
-                    match.GameMode,
-                    match.AverageSkillRating);
-
                 return match;
+            }
+        }
+
+        public void Restore(IReadOnlyCollection<PlayerEnqueuedEvent> players, string currentMessageId)
+        {
+            lock (_syncRoot)
+            {
+                foreach (var player in players)
+                {
+                    if (player.MessageId != currentMessageId &&
+                        _waiting.All(waiting => waiting.MessageId != player.MessageId))
+                    {
+                        _waiting.Add(player);
+                    }
+                }
             }
         }
 
@@ -107,8 +134,12 @@ public sealed class Matchmaker : IMatchmaker
                 }
 
                 var averageSkill = (int)Math.Round(window.Average(player => player.SkillRating));
+                var messageIds = window.Select(player => player.MessageId)
+                    .OrderBy(id => id, StringComparer.Ordinal)
+                    .ToArray();
+                var matchId = new Guid(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(messageIds)).AsSpan(0, 16));
                 return new MatchResult(
-                    Guid.NewGuid(),
+                    matchId,
                     window,
                     window[0].Region,
                     window[0].GameMode,

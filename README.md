@@ -9,7 +9,7 @@ Event-driven matchmaking queue worker built with .NET 10 and RabbitMQ. The servi
 3. Restore and build: `dotnet build PlayerQueueService.sln`.
 4. Run the worker: `dotnet run --project PlayerQueueService.Api`.
 
-The worker declares the configured exchange/queue topology on startup and will log consumed player events as they are processed. There is no HTTP surface area.
+The worker declares the configured exchange/queue topology on startup and logs consumed player events. Its only HTTP endpoints are health probes.
 
 ### Docker
 
@@ -37,6 +37,8 @@ All required fields are validated on host startup, and the worker stops if messa
 
 - Event contracts are validated on publish and consume; invalid messages are rejected before hitting business logic.
 - Poison or max-retry messages are `BasicNack`ed with `requeue=false` and routed to the configured dead-letter exchange/queue (`player-queue.dlx` / `player-queue.dead-letter` by default).
+- A failed match publish returns the other players to the in-memory queue. The current message is retried or dead-lettered by the consumer. A retry of the same players keeps the match ID.
+- Waiting players and processed-message IDs are kept in memory. A worker restart loses that state; durable matchmaking requires persistent storage.
 
 ### Matchmaking
 

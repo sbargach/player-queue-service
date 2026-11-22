@@ -160,6 +160,7 @@ public sealed class MatchResultPublisher : IMatchResultPublisher
     private static MatchFormedEvent BuildEvent(MatchResult match) =>
         new()
         {
+            MessageId = match.MatchId.ToString("N"),
             MatchId = match.MatchId,
             Region = match.Region,
             GameMode = match.GameMode,

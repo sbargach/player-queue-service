@@ -4,14 +4,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),  
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Released]
+## [Unreleased]
+
+## [1.0.1] - 2026-11-22
+### Fixed
+- Restore waiting players when a match event cannot be published, so a consumer retry can publish the same match.
+- Count matches only after their event is published.
+- Keep region and game mode buckets separate when either value contains a colon.
+
+### Changed
+- Use stable match and event IDs across publish retries.
+- Update OpenTelemetry, Serilog, and test packages within their existing API families.
 
 ## [1.0.0] - 2025-12-26
 ### Added
 - Dead-letter exchange/queue wiring and consumer dead-lettering for poisoned or max-retry messages.
 - Event contract validation on publish/consume with metrics for validation failures.
-
-## [Unreleased]
 
 ## [0.0.10] - 2025-12-25
 ### Added

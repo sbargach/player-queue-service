@@ -76,6 +76,81 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PublishFailure_RetriesMatchWithoutLosingPlayers()
+    {
+        _publisher.FailuresBeforeSuccess = 1;
+        await StartConsumerAsync(settingsOverride: _settings with { MaxRetryAttempts = 2, RetryDelaySeconds = 1 });
+
+        var first = new PlayerEnqueuedEvent
+        {
+            PlayerId = Guid.NewGuid(),
+            Region = "eu",
+            GameMode = "duos",
+            SkillRating = 1200
+        };
+        var second = new PlayerEnqueuedEvent
+        {
+            PlayerId = Guid.NewGuid(),
+            Region = "eu",
+            GameMode = "duos",
+            SkillRating = 1210
+        };
+
+        await _connection!.DeliverAsync(first);
+        await _connection.DeliverAsync(second);
+
+        var match = await _publisher.MatchPublished.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, match.Players.Count);
+        Assert.Equal(2, _publisher.Attempts.Count);
+        Assert.Equal(_publisher.Attempts[0].MatchId, _publisher.Attempts[1].MatchId);
+        Assert.Equal(2, _connection.AckCount);
+        Assert.Equal(0, _connection.NackCount);
+        _metrics.Received(1).IncrementMatchFormed(match);
+    }
+
+    [Fact]
+    public async Task DeadLetteredPlayer_IsNotMatchedAfterPublishFailure()
+    {
+        _publisher.FailuresBeforeSuccess = 2;
+        await StartConsumerAsync(settingsOverride: _settings with { MaxRetryAttempts = 2, RetryDelaySeconds = 1 });
+
+        var first = new PlayerEnqueuedEvent
+        {
+            PlayerId = Guid.NewGuid(),
+            Region = "eu",
+            GameMode = "duos",
+            SkillRating = 1200
+        };
+        var rejected = new PlayerEnqueuedEvent
+        {
+            PlayerId = Guid.NewGuid(),
+            Region = "eu",
+            GameMode = "duos",
+            SkillRating = 1210
+        };
+        var next = new PlayerEnqueuedEvent
+        {
+            PlayerId = Guid.NewGuid(),
+            Region = "eu",
+            GameMode = "duos",
+            SkillRating = 1220
+        };
+
+        await _connection!.DeliverAsync(first);
+        await _connection.DeliverAsync(rejected);
+        Assert.Single(_connection.DeadLetteredMessages);
+
+        await _connection.DeliverAsync(next);
+        var match = await _publisher.MatchPublished.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Contains(match.Players, player => player.MessageId == first.MessageId);
+        Assert.Contains(match.Players, player => player.MessageId == next.MessageId);
+        Assert.DoesNotContain(match.Players, player => player.MessageId == rejected.MessageId);
+        Assert.Equal(2, _connection.AckCount);
+        Assert.Equal(1, _connection.NackCount);
+    }
+
+    [Fact]
     public async Task DuplicateMessages_AreProcessedOnce()
     {
         var processor = new CountingProcessor();
@@ -580,8 +655,18 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
     {
         private readonly TaskCompletionSource<MatchResult> _published = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public int FailuresBeforeSuccess { get; set; }
+
+        public List<MatchResult> Attempts { get; } = new();
+
         public Task PublishAsync(MatchResult match, CancellationToken cancellationToken = default)
         {
+            Attempts.Add(match);
+            if (Attempts.Count <= FailuresBeforeSuccess)
+            {
+                throw new InvalidOperationException("publish failed");
+            }
+
             _published.TrySetResult(match);
             return Task.CompletedTask;
         }

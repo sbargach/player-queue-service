@@ -8,6 +8,7 @@ public class PlayerQueueProcessor : IPlayerQueueProcessor
     private readonly IMatchmaker _matchmaker;
     private readonly IMatchResultPublisher _matchResultPublisher;
     private readonly ILogger<PlayerQueueProcessor> _logger;
+    private readonly SemaphoreSlim _processingGate = new(1, 1);
 
     public PlayerQueueProcessor(
         IMatchmaker matchmaker,
@@ -21,12 +22,32 @@ public class PlayerQueueProcessor : IPlayerQueueProcessor
 
     public async Task ProcessAsync(PlayerEnqueuedEvent playerEvent, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var match = await _matchmaker.EnqueueAsync(playerEvent, cancellationToken).ConfigureAwait(false);
-        if (match is not null)
+        await _processingGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            await _matchResultPublisher.PublishAsync(match, cancellationToken).ConfigureAwait(false);
+            var match = await _matchmaker.EnqueueAsync(playerEvent, cancellationToken).ConfigureAwait(false);
+            if (match is null)
+            {
+                _logger.LogInformation(
+                    "Queued player {PlayerId} in region {Region} for mode {Mode} at {RequestedAt}",
+                    playerEvent.PlayerId,
+                    playerEvent.Region,
+                    playerEvent.GameMode,
+                    playerEvent.RequestedAt);
+                return;
+            }
+
+            try
+            {
+                await _matchResultPublisher.PublishAsync(match, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                _matchmaker.RestoreAfterPublishFailure(match, playerEvent.MessageId);
+                throw;
+            }
+
+            _matchmaker.ConfirmPublished(match);
             _logger.LogInformation(
                 "Matched {Count} players into {Mode} ({Region}) at avg skill {AverageSkill} (MatchId {MatchId})",
                 match.Players.Count,
@@ -34,14 +55,10 @@ public class PlayerQueueProcessor : IPlayerQueueProcessor
                 match.Region,
                 match.AverageSkillRating,
                 match.MatchId);
-            return;
         }
-
-        _logger.LogInformation(
-            "Queued player {PlayerId} in region {Region} for mode {Mode} at {RequestedAt}",
-            playerEvent.PlayerId,
-            playerEvent.Region,
-            playerEvent.GameMode,
-            playerEvent.RequestedAt);
+        finally
+        {
+            _processingGate.Release();
+        }
     }
 }
