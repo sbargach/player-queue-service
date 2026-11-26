@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   rabbitmq:
     image: rabbitmq:3.13-management
@@ -24,6 +22,8 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    ports:
+      - "8080:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       RabbitMQ__HostName: rabbitmq
@@ -32,6 +32,8 @@ services:
       RabbitMQ__QueueName: player-queue.enqueued
       RabbitMQ__ExchangeName: player-queue
       RabbitMQ__RoutingKey: player.queue.enqueued
+      Telemetry__Metrics__Endpoint: ""
+      Telemetry__Tracing__Endpoint: ""
     deploy:
       resources:
         limits:

@@ -1,6 +1,3 @@
-using System.Collections.Concurrent;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using PlayerQueueService.Api.Models.Configuration;
@@ -10,7 +7,8 @@ namespace PlayerQueueService.Api.Services;
 public sealed class InMemoryIdempotencyStore : IIdempotencyStore
 {
     private readonly IMemoryCache _cache;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
+    private readonly Dictionary<string, MessageLock> _locks = new();
+    private readonly object _locksGate = new();
     private readonly TimeSpan _retentionWindow;
 
     public InMemoryIdempotencyStore(IOptions<RabbitMQSettings> options, IMemoryCache cache)
@@ -26,35 +24,49 @@ public sealed class InMemoryIdempotencyStore : IIdempotencyStore
             throw new ArgumentException("messageId cannot be null or whitespace.", nameof(messageId));
         }
 
-        if (_cache.TryGetValue(messageId, out _))
+        MessageLock messageLock;
+        lock (_locksGate)
         {
-            _locks.TryRemove(messageId, out _);
-            return IdempotencyLease.AlreadyProcessed(messageId);
+            if (_cache.TryGetValue(messageId, out _))
+            {
+                return IdempotencyLease.AlreadyProcessed(messageId);
+            }
+
+            if (!_locks.TryGetValue(messageId, out messageLock!))
+            {
+                messageLock = new MessageLock();
+                _locks.Add(messageId, messageLock);
+            }
+
+            messageLock.Users++;
         }
 
-        var messageLock = _locks.GetOrAdd(messageId, _ => new SemaphoreSlim(1, 1));
-        await messageLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await messageLock.Semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            ReleaseReference(messageId, messageLock);
+            throw;
+        }
 
         if (_cache.TryGetValue(messageId, out _))
         {
-            messageLock.Release();
-            _locks.TryRemove(messageId, out _);
+            Release(messageId, messageLock);
             return IdempotencyLease.AlreadyProcessed(messageId);
         }
-
-        var processed = false;
 
         return new IdempotencyLease(
             messageId,
             onProcessed: () =>
             {
-                processed = true;
                 MarkProcessed(messageId);
                 return ValueTask.CompletedTask;
             },
             onDispose: () =>
             {
-                Release(messageId, messageLock, processed);
+                Release(messageId, messageLock);
                 return ValueTask.CompletedTask;
             });
     }
@@ -70,13 +82,26 @@ public sealed class InMemoryIdempotencyStore : IIdempotencyStore
             });
     }
 
-    private void Release(string messageId, SemaphoreSlim messageLock, bool markedProcessed)
+    private void Release(string messageId, MessageLock messageLock)
     {
-        messageLock.Release();
+        messageLock.Semaphore.Release();
+        ReleaseReference(messageId, messageLock);
+    }
 
-        if (markedProcessed || !_cache.TryGetValue(messageId, out _))
+    private void ReleaseReference(string messageId, MessageLock messageLock)
+    {
+        lock (_locksGate)
         {
-            _locks.TryRemove(messageId, out _);
+            if (--messageLock.Users == 0)
+            {
+                _locks.Remove(messageId);
+            }
         }
+    }
+
+    private sealed class MessageLock
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+        public int Users { get; set; }
     }
 }

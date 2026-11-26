@@ -9,11 +9,11 @@ RUN dotnet restore PlayerQueueService.Api/PlayerQueueService.Api.csproj
 COPY . .
 RUN dotnet publish PlayerQueueService.Api/PlayerQueueService.Api.csproj -c Release -o /app/publish /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/runtime:10.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 
-ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_HTTP_PORTS=8080
 ENV DOTNET_EnableDiagnostics=0
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "PlayerQueueService.Api.dll"]

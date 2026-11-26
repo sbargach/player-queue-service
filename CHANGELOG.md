@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-11-26
+
+### Fixed
+- Keep a message's idempotency lock until all concurrent deliveries have finished with it.
+- Use the ASP.NET Core runtime image and publish the worker's health port in Compose.
+- Remove duplicate console logging and an unnecessary ASP.NET Core port override warning.
+
+### Changed
+- Document a reproducible local demo and the service's restart and delivery limitations.
+- Exclude generated build and test files from the Docker build context and Git status.
+
 ## [1.0.1] - 2026-11-22
 ### Fixed
 - Restore waiting players when a match event cannot be published, so a consumer retry can publish the same match.

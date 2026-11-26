@@ -1,51 +1,42 @@
-# player-queue-service
+# Player Queue Service
 
-Event-driven matchmaking queue worker built with .NET 10 and RabbitMQ. The service runs as a generic host with a background consumer that processes player queue events using durable queues, manual acknowledgements, configuration validation at startup, and minimal HTTP surface area (health probes only).
+I built this to play around with RabbitMQ and a .NET worker. Send in player events, and when two players in the same region and game mode have close enough skill ratings, the worker publishes a match. There is no UI or gameplay here. I was mostly interested in what happens around acknowledgements, retries, publisher confirms, and dead-letter queues.
 
-## Running locally
+## Run it
 
-1. Install the .NET 10 SDK (`dotnet --info`).
-2. Start RabbitMQ (defaults in `appsettings.Development.json` use localhost and the guest account).
-3. Restore and build: `dotnet build PlayerQueueService.sln`.
-4. Run the worker: `dotnet run --project PlayerQueueService.Api`.
+You need Docker. From the repo root:
 
-The worker declares the configured exchange/queue topology on startup and logs consumed player events. Its only HTTP endpoints are health probes.
+```sh
+docker compose up --build
+```
 
-### Docker
+Open [RabbitMQ Management](http://localhost:15672) with `guest` / `guest`. Go to **Exchanges**, open `player-queue`, and publish these two messages with routing key `player.queue.enqueued`:
 
-You can run the worker and RabbitMQ locally without installing anything extra:
+```json
+{"messageId":"demo-player-1","playerId":"bf1a65ef-e0a2-4909-9c1d-8cb2da7f5e01","skillRating":1200,"region":"eu","gameMode":"duos"}
+```
 
-- Build and run: `docker compose up --build`
-- RabbitMQ management UI: http://localhost:15672 (guest/guest)
-- The worker listens for messages on `player-queue.enqueued` when the broker is healthy.
-- Health probes: `/health/live` (always up) and `/health/ready` (wires publisher/consumer checks) on port 8080.
+```json
+{"messageId":"demo-player-2","playerId":"bf1a65ef-e0a2-4909-9c1d-8cb2da7f5e02","skillRating":1210,"region":"eu","gameMode":"duos"}
+```
 
-## Configuration
+The worker should log a match. You can find the event in the `player-match.formed` queue. If you send the first message again, it should be skipped as a duplicate. The worker also has [liveness](http://localhost:8080/health/live) and [readiness](http://localhost:8080/health/ready) endpoints.
 
-The base `appsettings.json` keeps only Serilog settings; local development defaults (RabbitMQ, telemetry, matchmaking) live in `appsettings.Development.json`. All options can still be overridden via environment variables.
+`requestedAt` is left out of the examples so it defaults to the current time. If you do set it yourself, keep it recent: the matcher drops players older than `MaxQueueSeconds` (120 seconds by default).
 
-RabbitMQ options live under the `RabbitMQ` section in `appsettings*.json`:
+## A few things to know
 
-- `HostName`, `Port`, `UserName`, `Password`, `VirtualHost`
-- `QueueName`, `ExchangeName`, `RoutingKey`
-- `MatchResultsExchangeName`, `MatchResultsQueueName`, `MatchResultsRoutingKey`
-- `PrefetchCount`, `MaxRetryAttempts`, `RetryDelaySeconds`, `PublishConfirmTimeoutSeconds`
+The matcher and the list of processed message IDs are in memory. If the worker restarts while a player is waiting, that player is lost even though RabbitMQ has acknowledged the input message. Running two workers would also give each worker its own separate queue of waiting players. This is a single-worker experiment, not durable matchmaking.
 
-All required fields are validated on host startup, and the worker stops if message processing or channel stability is compromised to preserve delivery.
+A result can be published twice if the worker dies after publishing it but before acknowledging the input. The match ID stays the same for the same pair of message IDs, so a real consumer of match events would need to deduplicate it. I would add persistent waiting state and an outbox before using this design for anything that needs reliable delivery across restarts.
 
-### Reliability
+The consumer rejects invalid events to `player-queue.dead-letter`. Processing failures are retried first; after the configured limit they go to the same dead-letter queue. Settings live in `PlayerQueueService.Api/appsettings.Development.json` and can be overridden with environment variables.
 
-- Event contracts are validated on publish and consume; invalid messages are rejected before hitting business logic.
-- Poison or max-retry messages are `BasicNack`ed with `requeue=false` and routed to the configured dead-letter exchange/queue (`player-queue.dlx` / `player-queue.dead-letter` by default).
-- A failed match publish returns the other players to the in-memory queue. The current message is retried or dead-lettered by the consumer. A retry of the same players keeps the match ID.
-- Waiting players and processed-message IDs are kept in memory. A worker restart loses that state; durable matchmaking requires persistent storage.
+## Tests
 
-### Matchmaking
+```sh
+dotnet test PlayerQueueService.Api.Tests/PlayerQueueService.Api.Tests.csproj
+dotnet test PlayerQueueService.Api.IntegrationTests/PlayerQueueService.Api.IntegrationTests.csproj
+```
 
-The consumer uses a lightweight in-memory matcher to group players by region/mode. Defaults live under `Matchmaking` in `appsettings*.json`:
-
-- `TeamSize`: number of players required to form a match (default 2).
-- `MaxSkillDelta`: maximum allowed skill rating spread within a match.
-- `MaxQueueSeconds`: players waiting longer than this are dropped before matching.
-
-When a match forms, a telemetry event is emitted and queue wait durations are recorded per player.
+The second test project uses a fake RabbitMQ connection. It checks the consumer flow but does not start a real broker. The Docker run above is the quick way to try the actual RabbitMQ path locally.

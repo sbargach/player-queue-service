@@ -7,7 +7,6 @@ using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using System.Globalization;
 using PlayerQueueService.Api.Messaging.Consumers;
 using PlayerQueueService.Api.Messaging.Connectivity;
 using PlayerQueueService.Api.Messaging.HealthChecks;
@@ -28,8 +27,7 @@ public static class HostBuilderFactory
                 configuration
                     .ReadFrom.Configuration(context.Configuration)
                     .ReadFrom.Services(services)
-                    .Enrich.FromLogContext()
-                    .WriteTo.Console(formatProvider: CultureInfo.InvariantCulture);
+                    .Enrich.FromLogContext();
             })
             .ConfigureServices((context, services) =>
             {
