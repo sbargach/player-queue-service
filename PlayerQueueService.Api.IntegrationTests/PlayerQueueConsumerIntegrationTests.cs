@@ -332,6 +332,46 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
         Assert.Contains(_connection.DeadLetteredMessages, evt => evt.MessageId == playerEvent.MessageId);
     }
 
+    [Theory]
+    [InlineData("{not json")]
+    [InlineData("")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{\"messageId\":\"bad-type\",\"playerId\":\"bf1a65ef-e0a2-4909-9c1d-8cb2da7f5e01\",\"skillRating\":\"high\",\"region\":\"eu\",\"gameMode\":\"duos\"}")]
+    public async Task UnreadableMessages_AreDeadLetteredWithoutStopping(string body)
+    {
+        var processor = new CountingProcessor();
+        await StartConsumerAsync(processor);
+
+        await _connection!.DeliverRawAsync(Encoding.UTF8.GetBytes(body));
+
+        Assert.False(_lifetime!.ApplicationStopping.IsCancellationRequested);
+        Assert.Equal(0, _connection.AckCount);
+        Assert.Equal(1, _connection.NackCount);
+        Assert.False(_connection.LastNackRequeue);
+        Assert.Equal(0, processor.ProcessCount);
+    }
+
+    [Fact]
+    public async Task MessageWithoutMessageId_IsDeadLetteredInsteadOfGettingRandomId()
+    {
+        var processor = new CountingProcessor();
+        await StartConsumerAsync(processor);
+
+        const string body = "{\"playerId\":\"bf1a65ef-e0a2-4909-9c1d-8cb2da7f5e01\",\"skillRating\":1200,\"region\":\"eu\",\"gameMode\":\"duos\"}";
+
+        // Delivered twice, like a redelivery. Without the check, each copy would get its own
+        // generated id and both would be processed.
+        await _connection!.DeliverRawAsync(Encoding.UTF8.GetBytes(body));
+        await _connection!.DeliverRawAsync(Encoding.UTF8.GetBytes(body));
+
+        Assert.False(_lifetime!.ApplicationStopping.IsCancellationRequested);
+        Assert.Equal(0, _connection.AckCount);
+        Assert.Equal(2, _connection.NackCount);
+        Assert.False(_connection.LastNackRequeue);
+        Assert.Equal(0, processor.ProcessCount);
+    }
+
     [Fact]
     public async Task TraceContextHeaders_AreAppliedToConsumeActivity()
     {
@@ -477,6 +517,27 @@ public class PlayerQueueConsumerIntegrationTests : IAsyncLifetime
             props.MessageId.Returns(playerEvent.MessageId);
             var deliveryTag = (ulong)Random.Shared.Next(1, int.MaxValue);
             _inFlight[deliveryTag] = playerEvent;
+
+            await _consumer!.HandleBasicDeliver(
+                consumerTag: "consumer-tag",
+                deliveryTag: deliveryTag,
+                redelivered: false,
+                exchange: _settings.ExchangeName,
+                routingKey: _settings.RoutingKey,
+                properties: props,
+                body: body);
+        }
+
+        public async Task DeliverRawAsync(byte[] body)
+        {
+            if (_consumer is null)
+            {
+                await _consumerReady.Task.WaitAsync(CancellationToken.None);
+            }
+
+            var props = Substitute.For<IBasicProperties>();
+            props.Headers.Returns(new Dictionary<string, object?>());
+            var deliveryTag = (ulong)Random.Shared.Next(1, int.MaxValue);
 
             await _consumer!.HandleBasicDeliver(
                 consumerTag: "consumer-tag",

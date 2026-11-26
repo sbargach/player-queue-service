@@ -30,7 +30,7 @@ The matcher and the list of processed message IDs are in memory. If the worker r
 
 A result can be published twice if the worker dies after publishing it but before acknowledging the input. The match ID stays the same for the same pair of message IDs, so a real consumer of match events would need to deduplicate it. I would add persistent waiting state and an outbox before using this design for anything that needs reliable delivery across restarts.
 
-The consumer rejects invalid events to `player-queue.dead-letter`. Processing failures are retried first; after the configured limit they go to the same dead-letter queue. Settings live in `PlayerQueueService.Api/appsettings.Development.json` and can be overridden with environment variables.
+The consumer rejects invalid events to `player-queue.dead-letter`. That includes bodies that are not valid JSON and events without a `messageId`, because the id is what duplicate detection relies on. Processing failures are retried first; after the configured limit they go to the same dead-letter queue. Settings live in `PlayerQueueService.Api/appsettings.Development.json` and can be overridden with environment variables.
 
 ## Tests
 

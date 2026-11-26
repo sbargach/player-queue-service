@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-11-26
+
+### Fixed
+- Send messages that are not valid JSON to the dead-letter queue. Before, one broken message made the worker stop, and it hit the same message again after every restart.
+- Dead-letter messages without a `messageId` instead of giving them a random one. A random id changed on every redelivery, so duplicate detection did nothing for those messages.
+
 ## [1.0.2] - 2026-11-26
 
 ### Fixed

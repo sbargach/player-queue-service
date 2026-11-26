@@ -112,17 +112,18 @@ public sealed class PlayerQueueConsumer : BackgroundService
         var inFlightIncremented = false;
         try
         {
-            var message = JsonSerializer.Deserialize<PlayerEnqueuedEvent>(args.Body.Span, SerializerOptions);
-
-            if (message is null)
+            if (!TryReadMessage(args.Body, out var message, out var unreadableReason))
             {
-                _logger.LogError("Received empty player event message; sending to dead-letter queue");
-                activity?.SetStatus(ActivityStatusCode.Error, "deserialization_failed");
+                _logger.LogError(
+                    "Could not read player event {DeliveryTag} ({Reason}); sending to dead-letter queue",
+                    args.DeliveryTag,
+                    unreadableReason);
+                activity?.SetStatus(ActivityStatusCode.Error, unreadableReason);
                 stopwatch.Stop();
                 var poison = new PlayerEnqueuedEvent { GameMode = "unknown", Region = "unknown" };
-                _metrics.IncrementValidationFailure(poison, "consume", "deserialization_failed", _settings.QueueName);
-                _metrics.IncrementDeadLetter(poison, "deserialization_failed", _settings.QueueName);
-                _metrics.IncrementConsumeFailure(poison, "deserialization_failed", _settings.QueueName);
+                _metrics.IncrementValidationFailure(poison, "consume", unreadableReason, _settings.QueueName);
+                _metrics.IncrementDeadLetter(poison, unreadableReason, _settings.QueueName);
+                _metrics.IncrementConsumeFailure(poison, unreadableReason, _settings.QueueName);
                 _metrics.RecordConsumeDuration(poison, stopwatch.Elapsed.TotalMilliseconds, _settings.QueueName);
                 channel.BasicNack(args.DeliveryTag, multiple: false, requeue: false);
                 return;
@@ -229,6 +230,52 @@ public sealed class PlayerQueueConsumer : BackgroundService
                 _metrics.DecrementInFlight(_settings.QueueName);
             }
         }
+    }
+
+    /// <summary>
+    /// Reads the message body without letting bad input crash the worker.
+    /// A body that is not JSON, has the wrong shape, or has no messageId can never succeed,
+    /// so retrying it would only loop. The caller dead-letters it instead.
+    /// </summary>
+    private static bool TryReadMessage(
+        ReadOnlyMemory<byte> body,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out PlayerEnqueuedEvent? message,
+        out string reason)
+    {
+        message = null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                reason = "not_a_json_object";
+                return false;
+            }
+
+            // The model falls back to a new Guid when messageId is missing. That is handy for
+            // publishing, but on the consumer side it would give every redelivery a fresh id
+            // and quietly turn off deduplication. So the id has to be in the message itself.
+            if (!root.TryGetProperty("messageId", out var messageId) ||
+                messageId.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(messageId.GetString()))
+            {
+                reason = "missing_message_id";
+                return false;
+            }
+
+            message = root.Deserialize<PlayerEnqueuedEvent>(SerializerOptions);
+        }
+        catch (JsonException)
+        {
+            reason = "deserialization_failed";
+            return false;
+        }
+
+        reason = string.Empty;
+        return message is not null;
     }
 
     private static Activity? StartConsumeActivity(BasicDeliverEventArgs args)
